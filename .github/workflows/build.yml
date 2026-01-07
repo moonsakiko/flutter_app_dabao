@@ -1,4 +1,4 @@
-name: Flutter Build Final Fix
+name: Flutter Build Kotlin Fix
 on:
   workflow_dispatch:
 
@@ -30,35 +30,29 @@ jobs:
             flutter create . --platforms android --project-name my_diary_app
           fi
 
-      # 2. 💉【核武器修复】强制注入配置
-      # 不去查找替换了，直接在文件末尾追加配置，绝对不会报错
-      - name: Fix Android Dependencies
+      # 2. 💉【精准手术】升级 Kotlin 编译器 + 修复 MinSDK
+      # 这次我们直接修改 settings.gradle，这是 Flutter 3.19 控制版本的地方
+      - name: Upgrade Kotlin & MinSDK
         run: |
-          echo "🔧 Fixing MinSDK..."
-          # 1. 修复 MinSDK (这个之前验证过是好使的)
+          echo "🔧 Upgrading Kotlin Plugin to 1.9.0..."
+          # 在 android/settings.gradle 里找到旧版本号并替换
+          # 默认通常是 1.7.10，我们把它换成 1.9.0
+          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
+          
+          # 为了保险，也尝试修改 build.gradle (防止旧模板结构)
+          sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
+
+          echo "🔧 Fixing MinSdkVersion to 21..."
           sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
-          
-          echo "🔧 Injecting Resolution Strategy..."
-          # 2. 修复 Kotlin 冲突 (直接追加到文件末尾)
-          # 这段代码会强制所有 Kotlin 库使用 1.9.0 版本
-          cat <<EOF >> android/app/build.gradle
-          
-          // --- AI 自动注入的修复代码 ---
-          configurations.all {
-              resolutionStrategy {
-                  force "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
-                  force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.0"
-                  force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.0"
-              }
-          }
-          EOF
-          
-          echo "✅ Injection complete."
+
+          echo "✅ Check versions:"
+          grep "org.jetbrains.kotlin.android" android/settings.gradle || echo "Not found in settings.gradle"
+          grep "minSdkVersion" android/app/build.gradle
 
       - name: Install Dependencies
         run: flutter pub get
 
-      # 3. 🛡️ 打包 Debug 版 + 只保留 ARM64
+      # 3. 🛡️ 打包 Debug 版 + ARM64
       - name: Build APK
         run: flutter build apk --debug --target-platform android-arm64
 
@@ -66,5 +60,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: diary-app-final
+          name: diary-app-kotlin-fixed
           path: build/app/outputs/flutter-apk/app-debug.apk
