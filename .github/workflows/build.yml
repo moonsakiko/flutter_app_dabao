@@ -1,4 +1,4 @@
-name: Flutter Build Final Release
+name: Flutter Build Final (Icons + Compress)
 on:
   workflow_dispatch:
 
@@ -22,58 +22,52 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
 
-      # 1. 生成安卓工程
+      # 1. 生成工程
       - name: Create Android Project
         run: |
           if [ ! -d "android" ]; then
             flutter create . --platforms android --project-name my_diary_app
           fi
 
-      # 2. 💉【环境修复】(沿用上一次成功的方案)
-      # 升级 Kotlin 到 1.9.0，修复 MinSDK 到 21
+      # 2. 修复环境 (MinSDK & Kotlin)
       - name: Fix Android Environment
         run: |
-          # 修复 Kotlin 版本
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
-          # 修复 MinSDK
           sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
 
       - name: Install Dependencies
         run: flutter pub get
 
+      # 3. 🎨 生成图标和启动图
       - name: Generate Icons & Splash
         run: |
-          echo "🎨 Generating App Icons..."
+          echo "🎨 Generating Assets..."
+          # 确保 pubspec.yaml 里 ios: false 已经改好了
           dart run flutter_launcher_icons
-          
-          echo "🖼️ Generating Splash Screen..."
           dart run flutter_native_splash:create
 
-      # 3. 🔑【密钥生成】(Release 模式必须)
-      # 现场造一个签名证书，骗过编译器
+      # 4. 生成签名
       - name: Generate Keystore
         run: |
-          # 生成证书文件
           keytool -genkey -v -keystore upload-keystore.jks \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -alias upload -dname "CN=Android, OU=Android, O=Android, L=Android, S=Android, C=US" \
             -storepass android -keypass android
           
-          # 生成配置文件 (Flutter 默认读取这个文件)
           echo "storePassword=android" > android/key.properties
           echo "keyPassword=android" >> android/key.properties
           echo "keyAlias=upload" >> android/key.properties
           echo "storeFile=../../upload-keystore.jks" >> android/key.properties
 
-      # 4. ✨【极致打包】Release + ARM64
-      # 这次生成的包，体积会极其感人
+      # 5. ✨ 极限打包 (关键在这里!)
       - name: Build APK
+        # ❗❗❗ 检查这里是否包含了 --target-platform android-arm64
         run: flutter build apk --release --target-platform android-arm64
 
-      # 5. 上传 (文件名改成了 release)
+      # 6. 上传
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: diary-app-release-final
+          name: diary-app-v1.5-final
           path: build/app/outputs/flutter-apk/app-release.apk
