@@ -1,7 +1,7 @@
 name: my_diary_app
-description: A timeline diary app.
+description: A timeline diary app with features.
 publish_to: 'none'
-version: 1.2.0+1
+version: 1.5.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -9,45 +9,36 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # 👇 核心依赖 (新增了两个)
-  intl: ^0.18.0
-  shared_preferences: ^2.2.0
+  # 👇 核心依赖库
+  flutter_localizations: # 修复日期报错必须
+    sdk: flutter
+  intl: ^0.18.0          # 时间格式化
+  shared_preferences: ^2.2.0 # 本地存储
+  share_plus: ^7.2.0     # 导出/分享文件
+  file_picker: ^6.1.1    # 导入/选择文件
   cupertino_icons: ^1.0.2
-  share_plus: ^7.2.0      # 用于导出文件
-  path_provider: ^2.1.1   # 用于生成临时文件
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^2.0.0
-  flutter_launcher_icons: ^0.13.1
-  flutter_native_splash: ^2.3.10
+  flutter_launcher_icons: ^0.13.1 # 自动化图标工具
 
-flutter:
-  uses-material-design: true
-  
-  # 👇 注册图片
-  assets:
-    - assets/images/
-
-  # 👇 注册你的字体 (确保文件名为 myfont.ttf 且放在 assets/fonts/ 下)
-  fonts:
-    - family: MyFont
-      fonts:
-        - asset: assets/fonts/myfont.ttf
-        
-# 👇 1. 图标配置
+# 👇 图标配置 (运行 dart run flutter_launcher_icons 生成)
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: false
   image_path: "assets/images/icon.png"
-  min_sdk_android: 21 # 适配安卓系统
+  min_sdk_android: 21
 
-# 👇 2. 启动图配置
-flutter_native_splash:
-  color: "#FFFFFF" # 启动页背景色 (白色)
-  image: "assets/images/splash.png" # 中间的 Logo 图
-  android_12: 
-    image: "assets/images/splash.png"
-    color: "#FFFFFF"
-  fullscreen: true
+flutter:
+  uses-material-design: true
+  
+  # 👇 资源注册
+  assets:
+    - assets/images/
+  
+  # 👇 字体注册 (确保 assets/fonts/myfont.ttf 存在)
+  fonts:
+    - family: MyFont
+      fonts:
+        - asset: assets/fonts/myfont.ttf
