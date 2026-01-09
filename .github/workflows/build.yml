@@ -1,6 +1,6 @@
-name: Flutter Build Final Release
+name: Flutter Build Signed Release
 on:
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -10,7 +10,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # 1. 配置基础环境
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
@@ -23,57 +22,42 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
 
-      # 2. 生成安卓工程骨架
+      # 1. 生成工程 (如果缺失)
       - name: Create Android Project
         run: |
           if [ ! -d "android" ]; then
-            # 强制指定项目名，防止文件夹大小写导致报错
             flutter create . --platforms android --project-name my_diary_app
           fi
 
-      # 3. 💉【关键步骤】环境自动修复
-      # 解决 share_plus 等新插件导致的 Kotlin 版本冲突和 MinSDK 报错
+      # 2. 修复环境 (MinSDK & Kotlin)
       - name: Fix Android Environment
         run: |
-          echo "🔧 Fixing Kotlin Version to 1.9.0..."
-          # 修改 settings.gradle 中的插件版本
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
-          # 保险起见，尝试修改 build.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
-          
-          echo "🔧 Fixing MinSdkVersion to 21..."
-          # 修改 app/build.gradle 中的最低支持版本
           sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
 
-      - name: Install Dependencies
-        run: flutter pub get
-
-      # 4. 🔑【关键步骤】云端生成签名
-      # Release 包必须签名。这里我们在服务器上现场造一个证书。
-      - name: Generate Keystore
+      # 3. 生成图标
+      - name: Install Dependencies & Assets
         run: |
-          # 1. 生成 upload-keystore.jks 文件
-          keytool -genkey -v -keystore upload-keystore.jks \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias upload -dname "CN=Android, OU=Android, O=Android, L=Android, S=Android, C=US" \
-            -storepass android -keypass android
-          
-          # 2. 生成 key.properties 配置文件
-          # Flutter 编译时会自动读取这个文件来寻找密钥
-          echo "storePassword=android" > android/key.properties
-          echo "keyPassword=android" >> android/key.properties
-          echo "keyAlias=upload" >> android/key.properties
+          flutter pub get
+          dart run flutter_launcher_icons
+
+      # 4. 🔐 从 Secrets 恢复密钥 (实现固定签名)
+      - name: Restore Keystore from Secrets
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > upload-keystore.jks
+          echo "storePassword=${{ secrets.KEY_PASSWORD }}" > android/key.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
           echo "storeFile=../../upload-keystore.jks" >> android/key.properties
 
-      # 5. ✨【极限瘦身】打包 Release + ARM64
-      # --release: 开启混淆和压缩
-      # --target-platform: 只保留目前99%手机通用的 arm64 架构
+      # 5. 打包 Release
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
-      # 6. 上传最终产物
+      # 6. 上传
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: diary-app-release-final
+          name: diary-app-signed-update
           path: build/app/outputs/flutter-apk/app-release.apk
