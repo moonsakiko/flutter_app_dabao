@@ -1,6 +1,6 @@
 name: Flutter Build Final Release
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 手动触发
 
 jobs:
   build:
@@ -10,6 +10,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      # 1. 配置基础环境
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
@@ -22,56 +23,55 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
 
-      # 1. 生成安卓工程
+      # 2. 生成安卓工程骨架
       - name: Create Android Project
         run: |
           if [ ! -d "android" ]; then
+            # 强制指定项目名，防止文件夹大小写导致报错
             flutter create . --platforms android --project-name my_diary_app
           fi
 
-      # 2. 💉【环境修复】(沿用上一次成功的方案)
-      # 升级 Kotlin 到 1.9.0，修复 MinSDK 到 21
+      # 3. 💉【关键步骤】环境自动修复
+      # 解决 share_plus 等新插件导致的 Kotlin 版本冲突和 MinSDK 报错
       - name: Fix Android Environment
         run: |
-          # 修复 Kotlin 版本
+          echo "🔧 Fixing Kotlin Version to 1.9.0..."
+          # 修改 settings.gradle 中的插件版本
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
+          # 保险起见，尝试修改 build.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
-          # 修复 MinSDK
+          
+          echo "🔧 Fixing MinSdkVersion to 21..."
+          # 修改 app/build.gradle 中的最低支持版本
           sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
 
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Generate Icons & Splash
-        run: |
-          echo "🎨 Generating App Icons..."
-          dart run flutter_launcher_icons
-          
-          echo "🖼️ Generating Splash Screen..."
-          dart run flutter_native_splash:create
-
-      # 3. 🔑【密钥生成】(Release 模式必须)
-      # 现场造一个签名证书，骗过编译器
+      # 4. 🔑【关键步骤】云端生成签名
+      # Release 包必须签名。这里我们在服务器上现场造一个证书。
       - name: Generate Keystore
         run: |
-          # 生成证书文件
+          # 1. 生成 upload-keystore.jks 文件
           keytool -genkey -v -keystore upload-keystore.jks \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -alias upload -dname "CN=Android, OU=Android, O=Android, L=Android, S=Android, C=US" \
             -storepass android -keypass android
           
-          # 生成配置文件 (Flutter 默认读取这个文件)
+          # 2. 生成 key.properties 配置文件
+          # Flutter 编译时会自动读取这个文件来寻找密钥
           echo "storePassword=android" > android/key.properties
           echo "keyPassword=android" >> android/key.properties
           echo "keyAlias=upload" >> android/key.properties
           echo "storeFile=../../upload-keystore.jks" >> android/key.properties
 
-      # 4. ✨【极致打包】Release + ARM64
-      # 这次生成的包，体积会极其感人
+      # 5. ✨【极限瘦身】打包 Release + ARM64
+      # --release: 开启混淆和压缩
+      # --target-platform: 只保留目前99%手机通用的 arm64 架构
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
-      # 5. 上传 (文件名改成了 release)
+      # 6. 上传最终产物
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
