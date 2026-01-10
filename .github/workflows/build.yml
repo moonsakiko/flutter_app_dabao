@@ -18,39 +18,73 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 1. 确保安卓工程存在
-      - name: Create Android Project
+      # 👇👇👇 核心修改点：智能融合工程 👇👇👇
+      - name: Rebuild Android Project with User Code
         run: |
-          if [ ! -d "android" ]; then
-            flutter create . --platforms android --project-name lofter_fixer
+          # 1. 如果用户上传了部分 android 代码，先备份起来
+          if [ -d "android" ]; then
+            echo "📂 Detected existing android code, backing up..."
+            mv android android_user_backup
           fi
 
-      # 2. 🔧 放置模型文件 (重要！)
-      # 假设你把 best_float16.tflite 传到了仓库根目录的 models 文件夹
-      # 如果没有，你需要手动修改这里的来源路径
+          # 2. 强行生成一个标准的、完整的安卓工程骨架
+          echo "🔨 Generating fresh Android scaffold..."
+          flutter create . --platforms android --project-name lofter_fixer
+
+          # 3. 如果有备份，把用户的核心代码覆盖回去
+          if [ -d "android_user_backup" ]; then
+            echo "♻️ Restoring user's custom code (MainActivity, build.gradle, etc)..."
+            # 使用 cp -r 强制覆盖 (-f)
+            cp -rf android_user_backup/* android/
+            # 清理备份
+            rm -rf android_user_backup
+          fi
+          
+          # 4. 检查是否生成成功
+          if [ ! -f "android/settings.gradle" ]; then
+             echo "❌ Error: settings.gradle still missing!"
+             exit 1
+          fi
+
+      # 🔧 放置模型文件 (如果没有上传，创建一个假的防止编译报错)
       - name: Place TFLite Model
         run: |
           mkdir -p android/app/src/main/assets
-          # 尝试查找模型，如果没有则创建一个假的(防止编译失败，但在真机运行会崩)
           if [ -f "best_float16.tflite" ]; then
             cp best_float16.tflite android/app/src/main/assets/
             echo "✅ Model copied."
           else
-            echo "⚠️ Model NOT found in root! Make sure you upload best_float16.tflite"
-            # 这里的 fallback 仅为了能演示打包，实际使用必须上传模型
+            echo "⚠️ Model NOT found in root! Creating dummy file to pass build..."
             touch android/app/src/main/assets/best_float16.tflite 
           fi
 
-      # 3. 修复环境 (Kotlin版本冲突)
-      - name: Fix Android Environment
+      # 💉 注入依赖 (针对 Flutter 3.19+ 和 OpenCV 的兼容性修复)
+      - name: Inject Dependencies & Fix Environment
         run: |
+          echo "🔧 Injecting Kotlin 1.9.0..."
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
-          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle # OpenCV 需要 minSdk 24+
+          
+          echo "🔧 Injecting MinSDK 24..."
+          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
+          
+          # 如果用户没有上传 build.gradle，我们需要自动注入 OpenCV 和 Tensorflow
+          # 检查 build.gradle 是否包含 opencv，如果没有，手动追加
+          if ! grep -q "com.quickbirdstudios:opencv" android/app/build.gradle; then
+             echo "🔧 Injecting Native Dependencies (OpenCV & TFLite)..."
+             # 找到 dependencies { ... } 块并在其中插入
+             # 这里使用比较简单的追加方式（在文件末尾追加可能会失效，要在 dependencies 闭包内）
+             # 我们采用最稳妥的方式：直接替换整个 dependencies 块 (如果用户没传 gradle)
+             
+             # 但由于我们上面做了“备份覆盖”，如果你上传了 build.gradle，这里不需要动。
+             # 如果你没上传 build.gradle，下面的 sed 会尝试注入。
+             sed -i '/dependencies {/a \    implementation "org.tensorflow:tensorflow-lite:2.14.0"\n    implementation "org.tensorflow:tensorflow-lite-support:0.4.4"\n    implementation "com.quickbirdstudios:opencv:4.5.3.0"\n    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"' android/app/build.gradle
+          else
+             echo "✅ Custom dependencies detected in build.gradle, skipping injection."
+          fi
 
       - name: Install Dependencies
         run: flutter pub get
 
-      # 4. 打包
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
