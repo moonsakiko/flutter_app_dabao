@@ -1,7 +1,6 @@
-name: Build Lofter Fixer (Stable Save)
+name: Build Lofter Fixer (Respect User Config)
 on: workflow_dispatch
 
-# 👇 APP 名称
 env:
   APP_NAME: "LOFTER去水印"
 
@@ -22,106 +21,45 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 1. 重建工程 + 备份代码
-      - name: Recreate Android Project
-        run: |
-          mkdir -p user_backup
-          if [ -f "android/app/src/main/kotlin/com/example/lofter_fixer/MainActivity.kt" ]; then
-             cp android/app/src/main/kotlin/com/example/lofter_fixer/MainActivity.kt user_backup/
-          fi
-          
-          rm -rf android
-          flutter create . --platforms android --project-name lofter_fixer
-
-          TARGET_DIR="android/app/src/main/kotlin/com/example/lofter_fixer"
-          mkdir -p $TARGET_DIR
-          if [ -f "user_backup/MainActivity.kt" ]; then
-             cp user_backup/MainActivity.kt $TARGET_DIR/
-          fi
-
-      # 2. 📝【核心修改】生成加强版 Manifest
-      - name: Overwrite Android Configs
-        run: |
-          # 重点：增加了 requestLegacyExternalStorage="true"
-          cat > android/app/src/main/AndroidManifest.xml <<EOF
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-              <application
-                  android:label="${{ env.APP_NAME }}" 
-                  android:name="\${applicationName}"
-                  android:icon="@mipmap/ic_launcher"
-                  android:requestLegacyExternalStorage="true"> 
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:launchMode="singleTop"
-                      android:theme="@style/LaunchTheme"
-                      android:hardwareAccelerated="true"
-                      android:windowSoftInputMode="adjustResize">
-                      <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme"/>
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-                  <meta-data android:name="flutterEmbedding" android:value="2" />
-              </application>
-          </manifest>
-          EOF
-
-          # Gradle 配置 (保持不变)
-          cat > android/app/build.gradle <<EOF
-          plugins {
-              id "com.android.application"
-              id "kotlin-android"
-              id "dev.flutter.flutter-gradle-plugin"
-          }
-          android {
-              namespace "com.example.lofter_fixer"
-              compileSdkVersion 34
-              ndkVersion flutter.ndkVersion
-              compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
-              kotlinOptions { jvmTarget = '1.8' }
-              defaultConfig {
-                  applicationId "com.example.lofter_fixer"
-                  minSdkVersion 24
-                  targetSdkVersion flutter.targetSdkVersion
-                  versionCode 1
-                  versionName "1.0"
-              }
-              buildTypes { release { signingConfig signingConfigs.debug } }
-          }
-          flutter { source '../..' }
-          dependencies {
-              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
-              implementation "org.tensorflow:tensorflow-lite:2.14.0"
-              implementation "org.tensorflow:tensorflow-lite-support:0.4.4"
-              implementation "com.quickbirdstudios:opencv:4.5.3.0"
-              implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"
-          }
-          EOF
-
-      # 3. 放置模型
+      # 👇👇👇 关键变化：不再 rm -rf android 👇👇👇
+      # 我们假设你已经上传了修复好的 AndroidManifest.xml 和 MainActivity.kt
+      
+      # 1. 放置模型 (防止你忘了传)
       - name: Place TFLite Model
         run: |
           mkdir -p android/app/src/main/assets
           if [ -f "best_float16.tflite" ]; then
             cp best_float16.tflite android/app/src/main/assets/
+            echo "✅ Model copied."
           else
-            echo "❌ Error: Model not found!"
+            echo "❌ Error: best_float16.tflite not found!"
             touch android/app/src/main/assets/best_float16.tflite
           fi
 
-      - name: Fix Project Settings
-        run: sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
+      # 2. 注入核心依赖 (防止 build.gradle 没配置好)
+      # 如果你的 build.gradle 已经是好的，这一步也不会破坏它
+      - name: Ensure Dependencies
+        run: |
+          # 检查是否包含 OpenCV，如果没有，则注入到 build.gradle
+          if ! grep -q "com.quickbirdstudios:opencv" android/app/build.gradle; then
+             echo "🔧 Injecting Native Dependencies..."
+             sed -i '/dependencies {/a \    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"\n    implementation "org.tensorflow:tensorflow-lite:2.14.0"\n    implementation "org.tensorflow:tensorflow-lite-support:0.4.4"\n    implementation "com.quickbirdstudios:opencv:4.5.3.0"\n    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"' android/app/build.gradle
+          else
+             echo "✅ Dependencies already present."
+          fi
+
+          # 确保 Kotlin 版本正确
+          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
+
+      # 3. 改名与图标
+      - name: Setup App Metadata
+        run: |
+          # 仅当你的 Manifest 里没有写死 label 时，脚本才会尝试改名
+          # 但因为你本地 Manifest 已经写了 label，这步其实是保险
+          dart run flutter_launcher_icons
 
       - name: Install Dependencies
         run: flutter pub get
-
-      - name: Generate App Icon
-        run: dart run flutter_launcher_icons
 
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
@@ -129,5 +67,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LofterFixer-StableSave
+          name: LofterFixer-Stable
           path: build/app/outputs/flutter-apk/app-release.apk
