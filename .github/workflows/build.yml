@@ -1,16 +1,12 @@
-name: Flutter Build Final Release
-on:
-  workflow_dispatch: # 手动触发
+name: Build Lofter Fixer App
+on: workflow_dispatch
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      # 1. 配置基础环境
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
@@ -21,59 +17,45 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.0'
-          channel: 'stable'
 
-      # 2. 生成安卓工程骨架
+      # 1. 确保安卓工程存在
       - name: Create Android Project
         run: |
           if [ ! -d "android" ]; then
-            # 强制指定项目名，防止文件夹大小写导致报错
-            flutter create . --platforms android --project-name my_diary_app
+            flutter create . --platforms android --project-name lofter_fixer
           fi
 
-      # 3. 💉【关键步骤】环境自动修复
-      # 解决 share_plus 等新插件导致的 Kotlin 版本冲突和 MinSDK 报错
+      # 2. 🔧 放置模型文件 (重要！)
+      # 假设你把 best_float16.tflite 传到了仓库根目录的 models 文件夹
+      # 如果没有，你需要手动修改这里的来源路径
+      - name: Place TFLite Model
+        run: |
+          mkdir -p android/app/src/main/assets
+          # 尝试查找模型，如果没有则创建一个假的(防止编译失败，但在真机运行会崩)
+          if [ -f "best_float16.tflite" ]; then
+            cp best_float16.tflite android/app/src/main/assets/
+            echo "✅ Model copied."
+          else
+            echo "⚠️ Model NOT found in root! Make sure you upload best_float16.tflite"
+            # 这里的 fallback 仅为了能演示打包，实际使用必须上传模型
+            touch android/app/src/main/assets/best_float16.tflite 
+          fi
+
+      # 3. 修复环境 (Kotlin版本冲突)
       - name: Fix Android Environment
         run: |
-          echo "🔧 Fixing Kotlin Version to 1.9.0..."
-          # 修改 settings.gradle 中的插件版本
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
-          # 保险起见，尝试修改 build.gradle
-          sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
-          
-          echo "🔧 Fixing MinSdkVersion to 21..."
-          # 修改 app/build.gradle 中的最低支持版本
-          sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
+          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle # OpenCV 需要 minSdk 24+
 
       - name: Install Dependencies
         run: flutter pub get
 
-      # 4. 🔑【关键步骤】云端生成签名
-      # Release 包必须签名。这里我们在服务器上现场造一个证书。
-      - name: Generate Keystore
-        run: |
-          # 1. 生成 upload-keystore.jks 文件
-          keytool -genkey -v -keystore upload-keystore.jks \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias upload -dname "CN=Android, OU=Android, O=Android, L=Android, S=Android, C=US" \
-            -storepass android -keypass android
-          
-          # 2. 生成 key.properties 配置文件
-          # Flutter 编译时会自动读取这个文件来寻找密钥
-          echo "storePassword=android" > android/key.properties
-          echo "keyPassword=android" >> android/key.properties
-          echo "keyAlias=upload" >> android/key.properties
-          echo "storeFile=../../upload-keystore.jks" >> android/key.properties
-
-      # 5. ✨【极限瘦身】打包 Release + ARM64
-      # --release: 开启混淆和压缩
-      # --target-platform: 只保留目前99%手机通用的 arm64 架构
+      # 4. 打包
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
-      # 6. 上传最终产物
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: diary-app-release-final
+          name: LofterFixer-Release
           path: build/app/outputs/flutter-apk/app-release.apk

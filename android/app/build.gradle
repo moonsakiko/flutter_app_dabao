@@ -1,0 +1,15 @@
+dependencies {
+    // ... 原有的 implementation ...
+    
+    // 👇👇👇 新增这些 👇👇👇
+    
+    // 1. TensorFlow Lite (用于推理)
+    implementation 'org.tensorflow:tensorflow-lite:2.14.0'
+    implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
+
+    // 2. OpenCV Android (免配置NDK版，适合云打包)
+    implementation 'com.quickbirdstudios:opencv:4.5.3.0'
+    
+    // 3. Kotlin 协程
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"
+}
