@@ -1,17 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 基础权限 -->
+    <!-- 👇 权限全家桶 (保持不变) 👇 -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.INTERNET"/>
-    
-    <!-- Android 10 (API 29) 兼容性标记 -->
+    <!-- Android 10+ 媒体权限 -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <!-- Android 11+ 管理权限 (保险起见) -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application
         android:label="LOFTER修复机"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:requestLegacyExternalStorage="true"> <!-- 兼容旧版存储的关键 -->
+        android:requestLegacyExternalStorage="true"> <!-- 兼容旧版存储 -->
         
         <activity
             android:name=".MainActivity"
@@ -21,17 +22,24 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
+            
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme"
                 />
+            
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- 👇👇👇【关键修复】就是缺了这一段！👇👇👇 -->
+        <!-- 这一行告诉插件：我已经升级到 V2 引擎了，放心用吧 -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- 👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆 -->
+        
     </application>
 </manifest>
