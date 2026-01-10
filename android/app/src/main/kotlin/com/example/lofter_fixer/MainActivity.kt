@@ -3,7 +3,6 @@ package com.example.lofter_fixer
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -57,17 +56,20 @@ class MainActivity : FlutterActivity() {
                         tasks.forEach { task ->
                             val wmPath = task["wm"]!!
                             val cleanPath = task["clean"]!!
-                            val log = processOneImage(wmPath, cleanPath, confThreshold)
+                            // 传入文件名，方便保存时重命名
+                            val originalName = File(wmPath).name
+                            val log = processOneImage(wmPath, cleanPath, confThreshold, originalName)
+                            
                             if (log.startsWith("SUCCESS")) {
                                 successCount++
                             } else {
-                                debugLogs.append("${File(wmPath).name} -> $log\n")
+                                debugLogs.append("$originalName -> $log\n")
                             }
                         }
                         
                         withContext(Dispatchers.Main) {
                             if (successCount == 0 && tasks.isNotEmpty()) {
-                                result.error("NO_DETECTION", "未检测到水印或保存失败:\n$debugLogs", null)
+                                result.error("NO_DETECTION", "处理失败或未检测到水印:\n$debugLogs", null)
                             } else {
                                 result.success(successCount)
                             }
@@ -84,11 +86,12 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun processOneImage(wmPath: String, cleanPath: String, confThreshold: Float): String {
+    private fun processOneImage(wmPath: String, cleanPath: String, confThreshold: Float, originalName: String): String {
         try {
-            val wmBitmap = BitmapFactory.decodeFile(wmPath) ?: return "无法读取"
+            val wmBitmap = BitmapFactory.decodeFile(wmPath) ?: return "无法读取水印图"
             val cleanBitmap = BitmapFactory.decodeFile(cleanPath) ?: return "无法读取原图"
 
+            // 图像预处理
             val imageProcessor = ImageProcessor.Builder()
                 .add(ResizeOp(INPUT_SIZE, INPUT_SIZE, ResizeOp.ResizeMethod.BILINEAR))
                 .add(NormalizeOp(0f, 255f)) 
@@ -110,19 +113,24 @@ class MainActivity : FlutterActivity() {
                  parseOutputStandard(outputArray[0], confThreshold, wmBitmap.width, wmBitmap.height)
             }
 
-            if (bestBox != null) {
-                // 成功识别，开始修复并保存
-                val savedPath = repairAndSave(wmBitmap, cleanBitmap, bestBox, wmPath)
-                return if (savedPath != null) "SUCCESS" else "保存失败"
+            return if (bestBox != null) {
+                // 修复逻辑
+                val fixedBitmap = repairWithOpenCV(wmBitmap, cleanBitmap, bestBox)
+                // 保存逻辑 (使用 MediaStore)
+                if (fixedBitmap != null) {
+                    val saveResult = saveImageToGallery(fixedBitmap, originalName)
+                    if (saveResult) "SUCCESS" else "保存失败(权限或路径错误)"
+                } else {
+                    "修复计算错误"
+                }
             } else {
-                return "置信度过低"
+                "置信度过低"
             }
         } catch (e: Exception) {
             return "异常: ${e.message}"
         }
     }
 
-    // 解析逻辑保持不变
     private fun parseOutputStandard(rows: Array<FloatArray>, confThresh: Float, imgW: Int, imgH: Int): Rect? {
         val numAnchors = rows[0].size 
         var maxConf = 0f
@@ -163,8 +171,7 @@ class MainActivity : FlutterActivity() {
         )
     }
 
-    // 👇👇👇 核心修改：修复并使用 MediaStore 保存 👇👇👇
-    private fun repairAndSave(wmBm: Bitmap, cleanBm: Bitmap, rect: Rect, originalPath: String): String? {
+    private fun repairWithOpenCV(wmBm: Bitmap, cleanBm: Bitmap, rect: Rect): Bitmap? {
         val wmMat = Mat(); val cleanMat = Mat()
         Utils.bitmapToMat(wmBm, wmMat); Utils.bitmapToMat(cleanBm, cleanMat)
         Imgproc.resize(cleanMat, cleanMat, wmMat.size(), 0.0, 0.0, Imgproc.INTER_LANCZOS4)
@@ -179,56 +186,51 @@ class MainActivity : FlutterActivity() {
             patch.copyTo(wmMat.submat(safeRect))
             val resultBm = Bitmap.createBitmap(wmMat.cols(), wmMat.rows(), Bitmap.Config.ARGB_8888)
             Utils.matToBitmap(wmMat, resultBm)
-            
-            // 调用新的保存方法
-            return saveToGallery(resultBm, originalPath)
+            return resultBm
         }
         return null
     }
 
-    // 🏆 终极保存方法：兼容所有安卓版本
-    private fun saveToGallery(bitmap: Bitmap, originalPath: String): String? {
-        val filename = "Fixed_${File(originalPath).name}"
-        val folderName = "LofterFixed"
+    // 👇👇👇【核心修改】使用 MediaStore 保存图片 (兼容 Android 10-14) 👇👇👇
+    private fun saveImageToGallery(bitmap: Bitmap, originalName: String): Boolean {
+        val filename = "Fixed_${System.currentTimeMillis()}_$originalName"
+        var fos: OutputStream? = null
+        var imageUri: Uri? = null
 
-        // 策略 A: Android 10 (Q) 及以上，使用 MediaStore (最稳)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        try {
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                // 存到 Pictures/LofterFixed
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/$folderName")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-
-            val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-
-            uri?.let {
-                resolver.openOutputStream(it).use { out ->
-                    if (out != null) {
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 98, out)
-                    }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // 存放在 Pictures/LofterFixed 文件夹
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/LofterFixed")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
-                contentValues.clear()
-                contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(it, contentValues, null, null)
-                return "/storage/emulated/0/Pictures/$folderName/$filename" // 返回推测路径给 Flutter 预览
             }
-        } else {
-            // 策略 B: 旧版安卓，使用传统文件写入
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), folderName)
-            if (!dir.exists()) dir.mkdirs()
-            val file = File(dir, filename)
-            
-            FileOutputStream(file).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 98, out)
+
+            // 获取 ContentResolver (这是系统级的保存通道)
+            val resolver = context.contentResolver
+            imageUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+
+            if (imageUri == null) return false
+
+            fos = resolver.openOutputStream(imageUri)
+            if (fos != null) {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 98, fos)
+                fos.close()
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    contentValues.clear()
+                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(imageUri, contentValues, null, null)
+                }
+                return true
             }
-            
-            // 广播通知相册刷新
-            MediaScannerConnection.scanFile(context, arrayOf(file.toString()), arrayOf("image/jpeg"), null)
-            return file.absolutePath
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            fos?.close()
         }
-        return null
+        return false
     }
 }
