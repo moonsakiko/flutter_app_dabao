@@ -1,47 +1,15 @@
-plugins {
-    id "com.android.application"
-    id "kotlin-android"
-    id "dev.flutter.flutter-gradle-plugin"
-}
-
-android {
-    namespace "com.example.lofter_fixer"
-    compileSdkVersion 34
-    ndkVersion flutter.ndkVersion
-
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-    }
-
-    kotlinOptions {
-        jvmTarget = '1.8'
-    }
-
-    defaultConfig {
-        applicationId "com.example.lofter_fixer"
-        minSdkVersion 24  // 👈 必须 >= 21，推荐 24 以支持 OpenCV
-        targetSdkVersion flutter.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
-    }
-
-    buildTypes {
-        release {
-            signingConfig signingConfigs.debug
-        }
-    }
-}
-
-flutter {
-    source '../..'
-}
-
 dependencies {
-    // 👇 核心依赖库
-    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
-    implementation "org.tensorflow:tensorflow-lite:2.14.0"
-    implementation "org.tensorflow:tensorflow-lite-support:0.4.4"
-    implementation "com.quickbirdstudios:opencv:4.5.3.0"
+    // ... 原有的 implementation ...
+    
+    // 👇👇👇 新增这些 👇👇👇
+    
+    // 1. TensorFlow Lite (用于推理)
+    implementation 'org.tensorflow:tensorflow-lite:2.14.0'
+    implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
+
+    // 2. OpenCV Android (免配置NDK版，适合云打包)
+    implementation 'com.quickbirdstudios:opencv:4.5.3.0'
+    
+    // 3. Kotlin 协程
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"
 }

@@ -2,7 +2,7 @@ package com.example.lofter_fixer
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterActivity // 👈 必须是这个 embedding 包
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
@@ -24,14 +24,17 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 
-class MainActivity : FlutterActivity() { // 👈 必须继承 FlutterActivity
+class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.lofter_fixer/processor"
     private var tflite: Interpreter? = null
     private val INPUT_SIZE = 640 
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        OpenCVLoader.initDebug()
+        // 初始化OpenCV
+        if (!OpenCVLoader.initDebug()) {
+             android.util.Log.e("OpenCV", "Unable to load OpenCV!")
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             if (call.method == "processImages") {
@@ -172,7 +175,6 @@ class MainActivity : FlutterActivity() { // 👈 必须继承 FlutterActivity
             val resultBm = Bitmap.createBitmap(wmMat.cols(), wmMat.rows(), Bitmap.Config.ARGB_8888)
             Utils.matToBitmap(wmMat, resultBm)
             
-            // 写入私有缓存，无需权限
             val tempFileName = "Temp_${UUID.randomUUID()}.jpg"
             val file = File(cacheDir, tempFileName)
             FileOutputStream(file).use { out ->

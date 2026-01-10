@@ -1,4 +1,4 @@
-name: Build Lofter Fixer (Pure Local)
+name: Build Lofter Fixer (Local Files Only)
 on: workflow_dispatch
 
 env:
@@ -21,12 +21,13 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 1. 注入中文名称 (修改本地 Manifest)
+      # 1. 注入中文名称 (改 Manifest 的 Label)
       - name: Inject App Name
         run: |
+          echo "🏷️ Setting App Name to: ${{ env.APP_NAME }}"
           sed -i 's/android:label="[^"]*"/android:label="${{ env.APP_NAME }}"/g' android/app/src/main/AndroidManifest.xml
 
-      # 2. 放置模型 (必须在仓库根目录有 best_float16.tflite)
+      # 2. 放置模型
       - name: Place TFLite Model
         run: |
           mkdir -p android/app/src/main/assets
@@ -34,11 +35,11 @@ jobs:
             cp best_float16.tflite android/app/src/main/assets/
             echo "✅ Model injected."
           else
-            echo "❌ Error: best_float16.tflite missing in root!"
+            echo "❌ Error: best_float16.tflite missing!"
             exit 1
           fi
 
-      # 3. 安装依赖 (会自动处理 V2 Embedding 检查)
+      # 3. 安装依赖
       - name: Install Dependencies
         run: flutter pub get
 
