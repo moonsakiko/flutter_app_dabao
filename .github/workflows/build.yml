@@ -1,8 +1,10 @@
-name: Build Lofter Fixer (Final Append Strategy)
+name: Build Lofter Fixer (Final)
 on: workflow_dispatch
 
+# 👇👇👇 在这里修改你的 APP 中文名称 👇👇👇
 env:
   APP_NAME: "LOFTER去水印"
+# 👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆
 
 jobs:
   build:
@@ -21,92 +23,30 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 1. 备份你的本地文件 (Manifest 和 Kotlin)
-      - name: Backup Local Files
-        run: |
-          mkdir -p user_backup
-          
-          # 备份 Kotlin 核心逻辑
-          if [ -f "android/app/src/main/kotlin/com/example/lofter_fixer/MainActivity.kt" ]; then
-             cp android/app/src/main/kotlin/com/example/lofter_fixer/MainActivity.kt user_backup/
-             echo "✅ Backed up MainActivity.kt"
-          fi
-          
-          # 备份你的 AndroidManifest.xml (保留你的权限配置)
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-             cp android/app/src/main/AndroidManifest.xml user_backup/
-             echo "✅ Backed up AndroidManifest.xml"
-          fi
-
-      # 2. 重建标准工程 (这一步保证了 gal 插件不报错)
-      - name: Recreate Standard Android Project
-        run: |
-          echo "🧨 Cleaning old android directory..."
-          rm -rf android
-          
-          echo "🔨 Generating standard Flutter Android scaffold..."
-          flutter create . --platforms android --project-name lofter_fixer
-
-      # 3. 恢复你的代码
-      - name: Restore User Code
-        run: |
-          # 恢复 Kotlin
-          TARGET_DIR="android/app/src/main/kotlin/com/example/lofter_fixer"
-          mkdir -p $TARGET_DIR
-          cp user_backup/MainActivity.kt $TARGET_DIR/
-          
-          # 恢复 Manifest
-          if [ -f "user_backup/AndroidManifest.xml" ]; then
-             cp user_backup/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
-          fi
-          echo "✅ Code restored."
-
-      # 4. 💉【安全修改】Gradle 配置
-      - name: Inject Dependencies (Safe Append)
-        run: |
-          # A. 修改 settings.gradle (解决 Kotlin 版本冲突)
-          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
-          
-          # B. 修改 MinSDK 为 24 (OpenCV 需要)
-          # 尝试替换变量引用
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/g' android/app/build.gradle
-          # 尝试替换硬编码数字 (双重保险)
-          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
-
-          # C. 【关键】在文件末尾追加依赖块
-          # 不再去原来的 dependencies 里乱插了，直接在文件最后加一个新的块
-          # Gradle 会自动合并它们。
-          cat >> android/app/build.gradle <<EOF
-
-          // 👇 Added by CI Script
-          dependencies {
-              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
-              implementation "org.tensorflow:tensorflow-lite:2.14.0"
-              implementation "org.tensorflow:tensorflow-lite-support:0.4.4"
-              implementation "com.quickbirdstudios:opencv:4.5.3.0"
-              implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"
-          }
-          EOF
-
-          echo "✅ Dependencies appended successfully."
-          
-          # 打印出来检查一下 (方便调试)
-          tail -n 15 android/app/build.gradle
-
-      # 5. 放置模型
+      # 1. 放置模型 (唯一需要的额外文件操作)
       - name: Place TFLite Model
         run: |
           mkdir -p android/app/src/main/assets
           if [ -f "best_float16.tflite" ]; then
             cp best_float16.tflite android/app/src/main/assets/
+            echo "✅ Model copied."
           else
             echo "❌ Error: Model not found!"
+            # 创建个空的防止编译挂掉
             touch android/app/src/main/assets/best_float16.tflite
           fi
+
+      # 2. 📝 强制修改 APP 名称 (这是你想要的功能)
+      - name: Update App Name
+        run: |
+          echo "🏷️ Setting App Name to: ${{ env.APP_NAME }}"
+          # 使用 sed 找到 android:label="xxx" 并替换为 android:label="你的名字"
+          sed -i 's/android:label="[^"]*"/android:label="${{ env.APP_NAME }}"/g' android/app/src/main/AndroidManifest.xml
 
       - name: Install Dependencies
         run: flutter pub get
 
+      # 3. 生成图标
       - name: Generate App Icon
         run: |
           if [ -f "assets/images/icon.png" ]; then

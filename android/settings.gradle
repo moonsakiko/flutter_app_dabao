@@ -1,0 +1,30 @@
+pluginManagement {
+    def flutterSdkPath = {
+        def properties = new Properties()
+        def propertiesFile = new File("local.properties")
+        if (propertiesFile.exists()) {
+            propertiesFile.withReader("UTF-8") { reader -> properties.load(reader) }
+        }
+
+        def flutterRoot = properties.getProperty("flutter.sdk")
+        assert flutterRoot != null, "flutter.sdk not set in local.properties"
+        return flutterRoot
+    }()
+
+    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id "dev.flutter.flutter-plugin-loader" version "1.0.0"
+    id "com.android.application" version "7.3.0" apply false
+    // 👇👇👇 关键：强制指定 Kotlin 1.9.0 👇👇👇
+    id "org.jetbrains.kotlin.android" version "1.9.0" apply false
+}
+
+include ":app"
