@@ -1,10 +1,10 @@
-name: Build Lofter Fixer (Final)
+name: Build Lofter Fixer (Stable Local Config)
 on: workflow_dispatch
 
-# 👇👇👇 在这里修改你的 APP 中文名称 👇👇👇
+# 👇👇👇 在这里修改你的 APP 中文名 👇👇👇
 env:
   APP_NAME: "LOFTER去水印"
-# 👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆
+# 👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆
 
 jobs:
   build:
@@ -23,36 +23,37 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 1. 放置模型 (唯一需要的额外文件操作)
+      # 1. 设置 APP 中文名 (只改 Manifest 里的 label，最稳妥)
+      - name: Set App Name
+        run: |
+          sed -i 's/android:label="[^"]*"/android:label="${{ env.APP_NAME }}"/g' android/app/src/main/AndroidManifest.xml
+          echo "✅ App Name updated to: ${{ env.APP_NAME }}"
+
+      # 2. 放置 TFLite 模型
       - name: Place TFLite Model
         run: |
           mkdir -p android/app/src/main/assets
           if [ -f "best_float16.tflite" ]; then
             cp best_float16.tflite android/app/src/main/assets/
-            echo "✅ Model copied."
+            echo "✅ Model copied to assets."
           else
-            echo "❌ Error: Model not found!"
-            # 创建个空的防止编译挂掉
+            echo "❌ Error: Model NOT found in root directory!"
+            # 创建个空文件防止编译挂掉（虽然运行会崩）
             touch android/app/src/main/assets/best_float16.tflite
           fi
 
-      # 2. 📝 强制修改 APP 名称 (这是你想要的功能)
-      - name: Update App Name
-        run: |
-          echo "🏷️ Setting App Name to: ${{ env.APP_NAME }}"
-          # 使用 sed 找到 android:label="xxx" 并替换为 android:label="你的名字"
-          sed -i 's/android:label="[^"]*"/android:label="${{ env.APP_NAME }}"/g' android/app/src/main/AndroidManifest.xml
-
-      - name: Install Dependencies
-        run: flutter pub get
-
-      # 3. 生成图标
+      # 3. 生成图标 (如果你上传了 assets/images/icon.png)
       - name: Generate App Icon
         run: |
-          if [ -f "assets/images/icon.png" ]; then
-             dart run flutter_launcher_icons
+          if [ -f "pubspec.yaml" ]; then
+             flutter pub get
+             if [ -f "assets/images/icon.png" ]; then
+                echo "🎨 Generating Icons..."
+                dart run flutter_launcher_icons
+             fi
           fi
 
+      # 4. 打包 (不再重新生成工程，直接用你提交的配置)
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 

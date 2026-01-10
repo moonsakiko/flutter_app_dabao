@@ -3,14 +3,15 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.INTERNET"/>
-    <!-- 相册访问权限 -->
+    
+    <!-- Android 10 (API 29) 兼容性标记 -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
 
     <application
-        android:label="Lofter修复机" 
+        android:label="LOFTER修复机"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:requestLegacyExternalStorage="true"> <!-- 兼容 Android 10 的关键 -->
+        android:requestLegacyExternalStorage="true"> <!-- 兼容旧版存储的关键 -->
         
         <activity
             android:name=".MainActivity"

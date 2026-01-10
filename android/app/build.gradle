@@ -42,7 +42,8 @@ android {
 
     defaultConfig {
         applicationId "com.example.lofter_fixer"
-        minSdkVersion 24 
+        // 👇👇👇 核心修改：OpenCV 和 Gal 需要 24+ 👇👇👇
+        minSdkVersion 24
         targetSdkVersion flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
@@ -50,6 +51,8 @@ android {
 
     buildTypes {
         release {
+            // 推荐配置：使用 release 签名配置（如果没有 key.properties 会自动回退到 debug 签名）
+            // 这里为了云打包简单，暂时指向 debug，或者你可以不做修改
             signingConfig signingConfigs.debug
         }
     }
@@ -59,17 +62,14 @@ flutter {
     source '../..'
 }
 
+// 👇👇👇 核心修改：添加原生依赖库 👇👇👇
 dependencies {
-    // 基础 Kotlin
+    // 基础库
     implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"
     
-    // TFLite
+    // AI 与 图像处理
     implementation "org.tensorflow:tensorflow-lite:2.14.0"
     implementation "org.tensorflow:tensorflow-lite-support:0.4.4"
-    
-    // OpenCV
     implementation "com.quickbirdstudios:opencv:4.5.3.0"
-    
-    // 协程
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"
 }
