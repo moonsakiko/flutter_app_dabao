@@ -1,4 +1,4 @@
-name: Build Lofter Fixer (Surgical Fix)
+name: Build Lofter Fixer (Final Append Strategy)
 on: workflow_dispatch
 
 env:
@@ -21,7 +21,7 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 1. 备份你的核心代码和配置
+      # 1. 备份你的本地文件 (Manifest 和 Kotlin)
       - name: Backup Local Files
         run: |
           mkdir -p user_backup
@@ -32,20 +32,19 @@ jobs:
              echo "✅ Backed up MainActivity.kt"
           fi
           
-          # 备份 Manifest (保留你的权限配置)
+          # 备份你的 AndroidManifest.xml (保留你的权限配置)
           if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
              cp android/app/src/main/AndroidManifest.xml user_backup/
              echo "✅ Backed up AndroidManifest.xml"
           fi
 
-      # 2. 重建标准工程 (关键！这会生成 gal 插件需要的标准环境)
+      # 2. 重建标准工程 (这一步保证了 gal 插件不报错)
       - name: Recreate Standard Android Project
         run: |
           echo "🧨 Cleaning old android directory..."
           rm -rf android
           
           echo "🔨 Generating standard Flutter Android scaffold..."
-          # 让 Flutter 自己生成标准文件，包含了插件需要的 hook
           flutter create . --platforms android --project-name lofter_fixer
 
       # 3. 恢复你的代码
@@ -62,30 +61,37 @@ jobs:
           fi
           echo "✅ Code restored."
 
-      # 4. 💉【外科手术修改】修改 Gradle 配置 (不覆盖文件，只改内容)
-      - name: Modify Gradle Configs (Surgical)
+      # 4. 💉【安全修改】Gradle 配置
+      - name: Inject Dependencies (Safe Append)
         run: |
-          # A. 修改 settings.gradle 强制指定 Kotlin 1.9.0
-          # 这一步是为了解决新版插件的冲突
+          # A. 修改 settings.gradle (解决 Kotlin 版本冲突)
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           
-          # B. 修改 app/build.gradle 调整 MinSDK 为 24 (OpenCV/Gal 需要)
-          # 我们查找 "flutter.minSdkVersion" 并将其替换为 "24"
+          # B. 修改 MinSDK 为 24 (OpenCV 需要)
+          # 尝试替换变量引用
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/g' android/app/build.gradle
-          # 如果上面没找到（不同版本差异），尝试替换默认写法
+          # 尝试替换硬编码数字 (双重保险)
           sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
 
-          # C. 注入原生依赖 (OpenCV, TFLite)
-          # 我们在 "dependencies {" 这一行后面插入我们的库
-          # 这是一个精准的插入操作，不会破坏文件结构
-          sed -i '/dependencies {/a \
-              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"\
-              implementation "org.tensorflow:tensorflow-lite:2.14.0"\
-              implementation "org.tensorflow:tensorflow-lite-support:0.4.4"\
-              implementation "com.quickbirdstudios:opencv:4.5.3.0"\
-              implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"' android/app/build.gradle
+          # C. 【关键】在文件末尾追加依赖块
+          # 不再去原来的 dependencies 里乱插了，直接在文件最后加一个新的块
+          # Gradle 会自动合并它们。
+          cat >> android/app/build.gradle <<EOF
 
-          echo "✅ Gradle configurations patched successfully."
+          // 👇 Added by CI Script
+          dependencies {
+              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
+              implementation "org.tensorflow:tensorflow-lite:2.14.0"
+              implementation "org.tensorflow:tensorflow-lite-support:0.4.4"
+              implementation "com.quickbirdstudios:opencv:4.5.3.0"
+              implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"
+          }
+          EOF
+
+          echo "✅ Dependencies appended successfully."
+          
+          # 打印出来检查一下 (方便调试)
+          tail -n 15 android/app/build.gradle
 
       # 5. 放置模型
       - name: Place TFLite Model
