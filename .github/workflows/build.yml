@@ -1,4 +1,4 @@
-name: Build Lofter Fixer App
+name: Build Lofter Fixer App (Auto-Fix XML)
 on: workflow_dispatch
 
 jobs:
@@ -18,35 +18,80 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 👇👇👇 核心修改点：智能融合工程 👇👇👇
-      - name: Rebuild Android Project with User Code
+      # 1. 备份用户的 Kotlin 代码 (这是唯一不能丢的核心逻辑)
+      - name: Backup User Kotlin Code
         run: |
-          # 1. 如果用户上传了部分 android 代码，先备份起来
-          if [ -d "android" ]; then
-            echo "📂 Detected existing android code, backing up..."
-            mv android android_user_backup
-          fi
+          mkdir -p user_code_backup
+          # 查找 MainActivity.kt，不管它在哪里
+          find android -name "MainActivity.kt" -exec cp {} user_code_backup/ \;
+          echo "✅ Kotlin code backed up."
 
-          # 2. 强行生成一个标准的、完整的安卓工程骨架
+      # 2. 彻底重置安卓工程 (清除所有潜在的配置错误)
+      - name: Recreate Android Project
+        run: |
+          echo "🧨 Destroying old android config..."
+          rm -rf android
+          
           echo "🔨 Generating fresh Android scaffold..."
+          # 重新生成最纯净的安卓工程
           flutter create . --platforms android --project-name lofter_fixer
 
-          # 3. 如果有备份，把用户的核心代码覆盖回去
-          if [ -d "android_user_backup" ]; then
-            echo "♻️ Restoring user's custom code (MainActivity, build.gradle, etc)..."
-            # 使用 cp -r 强制覆盖 (-f)
-            cp -rf android_user_backup/* android/
-            # 清理备份
-            rm -rf android_user_backup
-          fi
+      # 3. 恢复 Kotlin 代码
+      - name: Restore Kotlin Code
+        run: |
+          # 找到新生成的 MainActivity 位置
+          TARGET_DIR=$(find android -name "MainActivity.kt" | xargs dirname)
+          echo "📂 Target directory: $TARGET_DIR"
           
-          # 4. 检查是否生成成功
-          if [ ! -f "android/settings.gradle" ]; then
-             echo "❌ Error: settings.gradle still missing!"
-             exit 1
-          fi
+          # 覆盖回去
+          cp user_code_backup/MainActivity.kt "$TARGET_DIR/"
+          echo "✅ Kotlin logic restored."
 
-      # 🔧 放置模型文件 (如果没有上传，创建一个假的防止编译报错)
+      # 4. 📝【关键】重写 AndroidManifest.xml
+      # 我们不修补你的文件，直接写入一个内容 100% 正确的新文件
+      - name: Overwrite AndroidManifest.xml
+        run: |
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          
+          # 使用 cat 命令直接写入完美的 XML 内容
+          cat > $MANIFEST_PATH <<EOF
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <!-- 👇 这里的权限是脚本自动加的，绝对不会错 👇 -->
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+          
+              <application
+                  android:label="Lofter修复机"
+                  android:name="\${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                          android:name="io.flutter.embedding.android.NormalTheme"
+                          android:resource="@style/NormalTheme"
+                          />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+              </application>
+          </manifest>
+          EOF
+          
+          echo "✅ AndroidManifest.xml has been rewritten perfectly."
+
+      # 5. 🔧 放置模型文件
       - name: Place TFLite Model
         run: |
           mkdir -p android/app/src/main/assets
@@ -54,35 +99,31 @@ jobs:
             cp best_float16.tflite android/app/src/main/assets/
             echo "✅ Model copied."
           else
-            echo "⚠️ Model NOT found in root! Creating dummy file to pass build..."
+            echo "⚠️ Model NOT found! Creating dummy file..."
             touch android/app/src/main/assets/best_float16.tflite 
           fi
 
-      # 💉 注入依赖 (针对 Flutter 3.19+ 和 OpenCV 的兼容性修复)
-      - name: Inject Dependencies & Fix Environment
+      # 6. 💉 注入 Gradle 依赖 (OpenCV & TFLite)
+      # 同样，我们自动修改 build.gradle，防止你本地文件缺东西
+      - name: Inject Gradle Dependencies
         run: |
-          echo "🔧 Injecting Kotlin 1.9.0..."
+          GRADLE_FILE="android/app/build.gradle"
+          
+          # 1. 修复 MinSDK 和 Kotlin 版本
+          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' $GRADLE_FILE
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           
-          echo "🔧 Injecting MinSDK 24..."
-          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
-          
-          # 如果用户没有上传 build.gradle，我们需要自动注入 OpenCV 和 Tensorflow
-          # 检查 build.gradle 是否包含 opencv，如果没有，手动追加
-          if ! grep -q "com.quickbirdstudios:opencv" android/app/build.gradle; then
-             echo "🔧 Injecting Native Dependencies (OpenCV & TFLite)..."
-             # 找到 dependencies { ... } 块并在其中插入
-             # 这里使用比较简单的追加方式（在文件末尾追加可能会失效，要在 dependencies 闭包内）
-             # 我们采用最稳妥的方式：直接替换整个 dependencies 块 (如果用户没传 gradle)
-             
-             # 但由于我们上面做了“备份覆盖”，如果你上传了 build.gradle，这里不需要动。
-             # 如果你没上传 build.gradle，下面的 sed 会尝试注入。
-             sed -i '/dependencies {/a \    implementation "org.tensorflow:tensorflow-lite:2.14.0"\n    implementation "org.tensorflow:tensorflow-lite-support:0.4.4"\n    implementation "com.quickbirdstudios:opencv:4.5.3.0"\n    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"' android/app/build.gradle
-          else
-             echo "✅ Custom dependencies detected in build.gradle, skipping injection."
-          fi
+          # 2. 注入依赖库
+          # 在 dependencies { 后面追加内容
+          sed -i '/dependencies {/a \
+              implementation "org.tensorflow:tensorflow-lite:2.14.0"\
+              implementation "org.tensorflow:tensorflow-lite-support:0.4.4"\
+              implementation "com.quickbirdstudios:opencv:4.5.3.0"\
+              implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"' $GRADLE_FILE
+              
+          echo "✅ Dependencies injected."
 
-      - name: Install Dependencies
+      - name: Install Flutter Dependencies
         run: flutter pub get
 
       - name: Build APK
