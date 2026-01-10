@@ -1,4 +1,4 @@
-name: Build Lofter Fixer App (Total Overwrite)
+name: Build Lofter Fixer App (Final Fix)
 on: workflow_dispatch
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 1. 备份用户的 Kotlin 核心代码 (这是唯一需要保留的逻辑)
+      # 1. 备份用户的 Kotlin 核心代码
       - name: Backup User Kotlin Code
         run: |
           mkdir -p user_code_backup
@@ -33,7 +33,6 @@ jobs:
           rm -rf android
           
           echo "🔨 Generating fresh Android scaffold..."
-          # 重新生成最纯净的安卓工程
           flutter create . --platforms android --project-name lofter_fixer
 
       # 3. 恢复 Kotlin 代码
@@ -47,7 +46,7 @@ jobs:
           cp user_code_backup/MainActivity.kt "$TARGET_DIR/"
           echo "✅ Kotlin logic restored."
 
-      # 4. 📝【关键】重写 AndroidManifest.xml (确保 XML 格式正确)
+      # 4. 重写 AndroidManifest.xml (确保权限正确)
       - name: Overwrite AndroidManifest.xml
         run: |
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
@@ -84,14 +83,12 @@ jobs:
           </manifest>
           EOF
 
-      # 5. 📝【关键】重写 android/app/build.gradle (解决 Gradle 报错)
-      # 我们直接写入一个完整的、包含 OpenCV 和 TFLite 的标准文件
-      # 这样绝对不会出现插入位置错误的问题
+      # 5. 📝【关键修复】重写 app/build.gradle
+      # 修复点：直接硬编码 Kotlin 版本为 1.9.0，不再引用不存在的变量
       - name: Overwrite app/build.gradle
         run: |
           GRADLE_PATH="android/app/build.gradle"
           
-          # 写入文件。注意：\$ 是为了防止 bash 试图解释这些变量
           cat > $GRADLE_PATH <<EOF
           plugins {
               id "com.android.application"
@@ -137,7 +134,7 @@ jobs:
 
               defaultConfig {
                   applicationId "com.example.lofter_fixer"
-                  minSdkVersion 24  // OpenCV 要求 24+
+                  minSdkVersion 24
                   targetSdkVersion flutter.targetSdkVersion
                   versionCode flutterVersionCode.toInteger()
                   versionName flutterVersionName
@@ -155,10 +152,9 @@ jobs:
           }
 
           dependencies {
-              // 👇 必须在这里引入依赖，位置绝对正确 👇
-              implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:\$kotlin_version"
+              // 👇 修改点：直接写死版本号 1.9.0，删除了 \$kotlin_version
+              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
               
-              // 核心原生库
               implementation "org.tensorflow:tensorflow-lite:2.14.0"
               implementation "org.tensorflow:tensorflow-lite-support:0.4.4"
               implementation "com.quickbirdstudios:opencv:4.5.3.0"
@@ -166,7 +162,7 @@ jobs:
           }
           EOF
           
-          echo "✅ build.gradle has been rewritten perfectly."
+          echo "✅ build.gradle rewritten with hardcoded versions."
 
       # 6. 🔧 放置模型文件
       - name: Place TFLite Model
@@ -180,7 +176,7 @@ jobs:
             touch android/app/src/main/assets/best_float16.tflite 
           fi
 
-      # 7. 修正项目级配置 (Kotlin版本)
+      # 7. 修正项目级配置
       - name: Fix Project Level Gradle
         run: |
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
