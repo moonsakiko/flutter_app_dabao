@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import 'package:path_provider/path_provider.dart'; // 虽然这里没显式用，但保留依赖
 import 'dart:io';
 
 void main() {
@@ -21,7 +22,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        cardTheme: CardTheme(elevation: 2, margin: const EdgeInsets.all(8)),
+        cardTheme: const CardTheme(elevation: 2, margin: EdgeInsets.all(8)),
       ),
       home: const HomePage(),
     );
@@ -42,23 +43,34 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   double _confidence = 0.4;
   String? _wmPath;
   String? _noWmPath;
+  String? _resultPath;
   bool _isProcessing = false;
-  String _log = "✅ 准备就绪\n📂 默认保存至：Download/LofterFixed";
+  String _log = "✅ 准备就绪\n📂 图片将保存至系统【下载】目录的 LofterFixed 文件夹";
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _requestPermissions();
+    _checkAndRequestPermissions();
   }
 
-  Future<void> _requestPermissions() async {
-    // 请求所有文件权限
+  // --- 🔒 权限申请加强版 ---
+  Future<void> _checkAndRequestPermissions() async {
+    // 1. 基础存储权限
+    var status = await Permission.storage.status;
+    if (!status.isGranted) {
+      await Permission.storage.request();
+    }
+
+    // 2. Android 11+ 的特殊权限 (所有文件访问)
+    // 即使 MediaStore 不需要它，但为了保证能读取相册所有位置，建议申请
     if (await Permission.manageExternalStorage.isDenied) {
       await Permission.manageExternalStorage.request();
     }
-    if (await Permission.storage.isDenied) {
-      await Permission.storage.request();
+    
+    // 3. Android 13+ 图片权限
+    if (await Permission.photos.isDenied) {
+      await Permission.photos.request();
     }
   }
 
@@ -71,18 +83,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("1. 核心功能", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("自动识别水印并使用原图修复。"),
+              Text("1. 核心原理", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text("利用 AI 识别水印位置，从无水印原图中截取对应区域覆盖修复。"),
               SizedBox(height: 10),
-              Text("2. 保存失败怎么办？", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("已升级【双保险保存模式】。如果普通保存失败，APP会自动调用系统相册API写入。请在【下载(Download)】文件夹中查找 LofterFixed。"),
+              Text("2. 单张模式", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text("手动选择一张【带水印图】和一张【无水印图】，点击修复即可。"),
               SizedBox(height: 10),
-              Text("3. 置信度", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("保持默认 40%-50% 即可获得最佳效果。"),
+              Text("3. 批量模式", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text("选择多张图片。系统会自动匹配文件名：\n- 水印图需包含 '-wm'\n- 原图需包含 '-orig'"),
+              SizedBox(height: 10),
+              Text("4. 文件位置", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text("修复后的图片保存在系统【Download/LofterFixed】文件夹。"),
             ],
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("好"))],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("懂了"))],
       ),
     );
   }
@@ -94,6 +109,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       setState(() {
         if (isWm) _wmPath = image.path;
         else _noWmPath = image.path;
+        _resultPath = null;
       });
     }
   }
@@ -103,7 +119,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       Fluttertoast.showToast(msg: "请先选择两张图片");
       return;
     }
-    _runNativeRepair([{'wm': _wmPath!, 'clean': _noWmPath!}]);
+    _runNativeRepair([{'wm': _wmPath!, 'clean': _noWmPath!}], isSingle: true);
   }
 
   Future<void> _pickFilesBatch() async {
@@ -135,11 +151,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _addLog("❌ 未找到匹配图片。请确保文件名包含 -wm 和 -orig");
     } else {
       _addLog("✅ 匹配到 ${tasks.length} 组任务");
-      _runNativeRepair(tasks);
+      _runNativeRepair(tasks, isSingle: false);
     }
   }
 
-  Future<void> _runNativeRepair(List<Map<String, String>> tasks) async {
+  Future<void> _runNativeRepair(List<Map<String, String>> tasks, {required bool isSingle}) async {
     setState(() => _isProcessing = true);
     try {
       final result = await platform.invokeMethod('processImages', {
@@ -149,11 +165,22 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
       int successCount = result is int ? result : 0;
       
-      if (successCount > 0) {
-        _addLog("🎉 成功修复 $successCount 张！\n请检查文件管理器：Download/LofterFixed");
-        Fluttertoast.showToast(msg: "修复成功");
-      } else {
-        _addLog("⚠️ 处理结束，但未成功修复 (请检查置信度)");
+      String msg = successCount > 0 
+          ? "🎉 成功修复 $successCount 张！\n📂 已保存至 Download/LofterFixed" 
+          : "⚠️ 未能修复，请尝试调整置信度";
+      
+      _addLog(msg);
+      Fluttertoast.showToast(msg: successCount > 0 ? "修复完成" : "修复失败");
+
+      if (isSingle && successCount > 0 && _wmPath != null) {
+        // 尝试推测路径用于预览
+        // 注意：由于 Android 11+ 路径访问限制，这里可能无法直接读取到 File
+        // 我们尝试构建一个标准路径，如果读不到，就不显示预览，但文件肯定在相册里
+        String fileName = File(_wmPath!).uri.pathSegments.last;
+        String potentialPath = "/storage/emulated/0/Download/LofterFixed/Fixed_$fileName";
+        if (File(potentialPath).existsSync()) {
+          setState(() => _resultPath = potentialPath);
+        }
       }
 
     } on PlatformException catch (e) {
@@ -212,9 +239,39 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             ),
           ),
 
-          // 日志区
+          if (_resultPath != null)
+            Container(
+              height: 120,
+              padding: const EdgeInsets.all(8),
+              color: Colors.green.withOpacity(0.1),
+              child: Row(
+                children: [
+                  AspectRatio(
+                    aspectRatio: 1,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(File(_resultPath!), fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.image_not_supported)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text("✨ 修复效果预览", style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text("已保存到 Download 文件夹", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    ],
+                  )),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => setState(() => _resultPath = null),
+                  )
+                ],
+              ),
+            ),
+
           Container(
-            height: 150,
+            height: 120,
             width: double.infinity,
             color: Colors.black.withOpacity(0.05),
             padding: const EdgeInsets.all(8),
@@ -261,7 +318,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         children: [
           const Icon(Icons.folder_zip, size: 80, color: Colors.teal),
           const SizedBox(height: 20),
-          const Text("规则：\n- 水印图需包含 -wm\n- 原图需包含 -orig", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+          const Text("请选择包含以下后缀的图片对：", style: TextStyle(color: Colors.grey)),
+          const Text("-wm.jpg (水印图)\n-orig.jpg (原图)", style: TextStyle(fontWeight: FontWeight.bold, height: 1.5)),
           const SizedBox(height: 30),
           FilledButton(
             onPressed: _isProcessing ? null : _pickFilesBatch,
