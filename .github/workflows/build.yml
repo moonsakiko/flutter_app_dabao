@@ -1,8 +1,7 @@
-name: Build Lofter Fixer (Local Files Only)
+name: Build Lofter Fixer (Pure Local)
 on: workflow_dispatch
 
 env:
-  # 👇 在这里定义中文名，脚本会自动帮你注入到 Manifest 里
   APP_NAME: "LOFTER去水印"
 
 jobs:
@@ -22,13 +21,12 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 1. 注入中文名称 (仅修改 Manifest 中的 label 属性)
+      # 1. 注入中文名称 (修改本地 Manifest)
       - name: Inject App Name
         run: |
-          echo "🏷️ Setting App Name to: ${{ env.APP_NAME }}"
           sed -i 's/android:label="[^"]*"/android:label="${{ env.APP_NAME }}"/g' android/app/src/main/AndroidManifest.xml
 
-      # 2. 放置模型 (仅当仓库里有 best_float16.tflite 时才复制)
+      # 2. 放置模型 (必须在仓库根目录有 best_float16.tflite)
       - name: Place TFLite Model
         run: |
           mkdir -p android/app/src/main/assets
@@ -36,15 +34,15 @@ jobs:
             cp best_float16.tflite android/app/src/main/assets/
             echo "✅ Model injected."
           else
-            echo "❌ Error: best_float16.tflite missing!"
+            echo "❌ Error: best_float16.tflite missing in root!"
             exit 1
           fi
 
-      # 3. 安装依赖 (自动下载 gal 等库)
+      # 3. 安装依赖 (会自动处理 V2 Embedding 检查)
       - name: Install Dependencies
         run: flutter pub get
 
-      # 4. 生成图标 (仅当 icon 存在时)
+      # 4. 生成图标
       - name: Generate App Icon
         run: |
           if [ -f "assets/images/icon.png" ]; then

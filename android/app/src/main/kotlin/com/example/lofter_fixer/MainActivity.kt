@@ -24,7 +24,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterActivity() { // 👈 必须继承 FlutterActivity
     private val CHANNEL = "com.example.lofter_fixer/processor"
     private var tflite: Interpreter? = null
     private val INPUT_SIZE = 640 
@@ -45,21 +45,16 @@ class MainActivity : FlutterActivity() {
                             tflite = Interpreter(modelFile)
                         }
                         
-                        // 结果列表：存储处理成功的临时文件路径
                         val successPaths = mutableListOf<String>()
                         val debugLogs = StringBuilder()
 
                         tasks.forEach { task ->
                             val wmPath = task["wm"]!!
                             val cleanPath = task["clean"]!!
-                            
-                            // 调用核心处理逻辑
                             val processingResult = processOneImage(wmPath, cleanPath, confThreshold)
                             
                             if (processingResult.startsWith("SUCCESS:")) {
-                                // 提取临时文件路径
-                                val tempPath = processingResult.removePrefix("SUCCESS:")
-                                successPaths.add(tempPath)
+                                successPaths.add(processingResult.removePrefix("SUCCESS:"))
                             } else {
                                 debugLogs.append("${File(wmPath).name} -> $processingResult\n")
                             }
@@ -69,7 +64,6 @@ class MainActivity : FlutterActivity() {
                             if (successPaths.isEmpty() && tasks.isNotEmpty()) {
                                 result.error("NO_DETECTION", "未检测到水印或处理失败:\n$debugLogs", null)
                             } else {
-                                // ✅ 把临时文件路径列表传回给 Flutter
                                 result.success(successPaths)
                             }
                         }
@@ -112,7 +106,6 @@ class MainActivity : FlutterActivity() {
             }
 
             return if (bestBox != null) {
-                // 如果修复成功，返回临时文件路径
                 repairAndSaveToCache(wmBitmap, cleanBitmap, bestBox)
             } else {
                 "置信度过低"
@@ -122,7 +115,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // --- 核心算法区 (Parse & Convert) 保持不变 ---
     private fun parseOutputStandard(rows: Array<FloatArray>, confThresh: Float, imgW: Int, imgH: Int): Rect? {
         val numAnchors = rows[0].size 
         var maxConf = 0f
@@ -163,7 +155,6 @@ class MainActivity : FlutterActivity() {
         )
     }
 
-    // --- ✅ 新的保存逻辑：只存 Cache，不管权限 ---
     private fun repairAndSaveToCache(wmBm: Bitmap, cleanBm: Bitmap, rect: Rect): String {
         val wmMat = Mat(); val cleanMat = Mat()
         Utils.bitmapToMat(wmBm, wmMat); Utils.bitmapToMat(cleanBm, cleanMat)
@@ -181,13 +172,12 @@ class MainActivity : FlutterActivity() {
             val resultBm = Bitmap.createBitmap(wmMat.cols(), wmMat.rows(), Bitmap.Config.ARGB_8888)
             Utils.matToBitmap(wmMat, resultBm)
             
-            // 写入私有缓存目录
+            // 写入私有缓存，无需权限
             val tempFileName = "Temp_${UUID.randomUUID()}.jpg"
             val file = File(cacheDir, tempFileName)
             FileOutputStream(file).use { out ->
                 resultBm.compress(Bitmap.CompressFormat.JPEG, 100, out)
             }
-            
             return "SUCCESS:${file.absolutePath}"
         }
         return "修复区域无效"
