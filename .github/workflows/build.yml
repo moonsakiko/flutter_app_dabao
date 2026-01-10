@@ -1,4 +1,4 @@
-name: Build Lofter Fixer App (Auto-Fix XML)
+name: Build Lofter Fixer App (Total Overwrite)
 on: workflow_dispatch
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      # 1. 备份用户的 Kotlin 代码 (这是唯一不能丢的核心逻辑)
+      # 1. 备份用户的 Kotlin 核心代码 (这是唯一需要保留的逻辑)
       - name: Backup User Kotlin Code
         run: |
           mkdir -p user_code_backup
@@ -26,7 +26,7 @@ jobs:
           find android -name "MainActivity.kt" -exec cp {} user_code_backup/ \;
           echo "✅ Kotlin code backed up."
 
-      # 2. 彻底重置安卓工程 (清除所有潜在的配置错误)
+      # 2. 彻底销毁并重建安卓工程
       - name: Recreate Android Project
         run: |
           echo "🧨 Destroying old android config..."
@@ -47,20 +47,15 @@ jobs:
           cp user_code_backup/MainActivity.kt "$TARGET_DIR/"
           echo "✅ Kotlin logic restored."
 
-      # 4. 📝【关键】重写 AndroidManifest.xml
-      # 我们不修补你的文件，直接写入一个内容 100% 正确的新文件
+      # 4. 📝【关键】重写 AndroidManifest.xml (确保 XML 格式正确)
       - name: Overwrite AndroidManifest.xml
         run: |
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          
-          # 使用 cat 命令直接写入完美的 XML 内容
           cat > $MANIFEST_PATH <<EOF
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <!-- 👇 这里的权限是脚本自动加的，绝对不会错 👇 -->
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
               <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
               <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-          
               <application
                   android:label="Lofter修复机"
                   android:name="\${applicationName}"
@@ -88,10 +83,92 @@ jobs:
               </application>
           </manifest>
           EOF
-          
-          echo "✅ AndroidManifest.xml has been rewritten perfectly."
 
-      # 5. 🔧 放置模型文件
+      # 5. 📝【关键】重写 android/app/build.gradle (解决 Gradle 报错)
+      # 我们直接写入一个完整的、包含 OpenCV 和 TFLite 的标准文件
+      # 这样绝对不会出现插入位置错误的问题
+      - name: Overwrite app/build.gradle
+        run: |
+          GRADLE_PATH="android/app/build.gradle"
+          
+          # 写入文件。注意：\$ 是为了防止 bash 试图解释这些变量
+          cat > $GRADLE_PATH <<EOF
+          plugins {
+              id "com.android.application"
+              id "kotlin-android"
+              id "dev.flutter.flutter-gradle-plugin"
+          }
+
+          def localProperties = new Properties()
+          def localPropertiesFile = rootProject.file('local.properties')
+          if (localPropertiesFile.exists()) {
+              localPropertiesFile.withReader('UTF-8') { reader ->
+                  localProperties.load(reader)
+              }
+          }
+
+          def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+          if (flutterVersionCode == null) {
+              flutterVersionCode = '1'
+          }
+
+          def flutterVersionName = localProperties.getProperty('flutter.versionName')
+          if (flutterVersionName == null) {
+              flutterVersionName = '1.0'
+          }
+
+          android {
+              namespace "com.example.lofter_fixer"
+              compileSdkVersion 34
+              ndkVersion flutter.ndkVersion
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+
+              kotlinOptions {
+                  jvmTarget = '1.8'
+              }
+
+              sourceSets {
+                  main.java.srcDirs += 'src/main/kotlin'
+              }
+
+              defaultConfig {
+                  applicationId "com.example.lofter_fixer"
+                  minSdkVersion 24  // OpenCV 要求 24+
+                  targetSdkVersion flutter.targetSdkVersion
+                  versionCode flutterVersionCode.toInteger()
+                  versionName flutterVersionName
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.debug
+                  }
+              }
+          }
+
+          flutter {
+              source '../..'
+          }
+
+          dependencies {
+              // 👇 必须在这里引入依赖，位置绝对正确 👇
+              implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:\$kotlin_version"
+              
+              // 核心原生库
+              implementation "org.tensorflow:tensorflow-lite:2.14.0"
+              implementation "org.tensorflow:tensorflow-lite-support:0.4.4"
+              implementation "com.quickbirdstudios:opencv:4.5.3.0"
+              implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"
+          }
+          EOF
+          
+          echo "✅ build.gradle has been rewritten perfectly."
+
+      # 6. 🔧 放置模型文件
       - name: Place TFLite Model
         run: |
           mkdir -p android/app/src/main/assets
@@ -103,25 +180,10 @@ jobs:
             touch android/app/src/main/assets/best_float16.tflite 
           fi
 
-      # 6. 💉 注入 Gradle 依赖 (OpenCV & TFLite)
-      # 同样，我们自动修改 build.gradle，防止你本地文件缺东西
-      - name: Inject Gradle Dependencies
+      # 7. 修正项目级配置 (Kotlin版本)
+      - name: Fix Project Level Gradle
         run: |
-          GRADLE_FILE="android/app/build.gradle"
-          
-          # 1. 修复 MinSDK 和 Kotlin 版本
-          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' $GRADLE_FILE
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
-          
-          # 2. 注入依赖库
-          # 在 dependencies { 后面追加内容
-          sed -i '/dependencies {/a \
-              implementation "org.tensorflow:tensorflow-lite:2.14.0"\
-              implementation "org.tensorflow:tensorflow-lite-support:0.4.4"\
-              implementation "com.quickbirdstudios:opencv:4.5.3.0"\
-              implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"' $GRADLE_FILE
-              
-          echo "✅ Dependencies injected."
 
       - name: Install Flutter Dependencies
         run: flutter pub get
