@@ -16,17 +16,14 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'LOFTER 去水印',
+      title: 'LOFTER 修复机',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        brightness: Brightness.light,
+        cardTheme: const CardTheme(elevation: 2, margin: EdgeInsets.symmetric(vertical: 8)),
       ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal, brightness: Brightness.dark),
-        brightness: Brightness.dark,
-      ),
+      darkTheme: ThemeData.dark(useMaterial3: true),
       home: const HomePage(),
     );
   }
@@ -41,29 +38,40 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  
-  // 核心通道：与 Kotlin 通信
   static const platform = MethodChannel('com.example.lofter_fixer/processor');
 
-  // 状态变量
   double _confidence = 0.5;
   String? _wmPath;
   String? _noWmPath;
   bool _isProcessing = false;
-  String _log = "准备就绪\n请确保模型已放入 android/assets 目录";
+  
+  // 页面控制
+  int _selectedIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _requestPermissions();
+    _checkPermission();
   }
 
-  Future<void> _requestPermissions() async {
-    await [Permission.storage, Permission.photos].request();
+  Future<void> _checkPermission() async {
+    // Android 13+ 需要 photos 权限，旧版需要 storage
+    if (await Permission.storage.request().isGranted || 
+        await Permission.photos.request().isGranted) {
+      // 权限已获取
+    }
   }
 
-  // --- 单张处理逻辑 ---
+  // --- 侧边栏导航逻辑 ---
+  void _onDrawerItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+    Navigator.pop(context); // 关闭抽屉
+  }
+
+  // --- 核心业务逻辑 ---
   Future<void> _pickImage(bool isWm) async {
     final ImagePicker picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
@@ -83,9 +91,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _runNativeRepair([{'wm': _wmPath!, 'clean': _noWmPath!}]);
   }
 
-  // --- 批量处理逻辑 ---
   Future<void> _pickFilesBatch() async {
-    // 允许用户多选文件
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       type: FileType.image,
@@ -98,142 +104,207 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   void _matchAndProcess(List<String> files) {
-    // 简单的匹配逻辑：找 xxx-wm.jpg 和 xxx-orig.jpg (或用户自定义的后缀)
-    // 这里为了适配你的脚本习惯，假设成对出现
-    
     List<Map<String, String>> tasks = [];
     List<String> wmFiles = files.where((f) => f.toLowerCase().contains("-wm.")).toList();
     
     for (var wm in wmFiles) {
-      // 尝试寻找对应的无水印图 (-orig)
-      // 逻辑：把 -wm 替换成 -orig 看看在不在列表里
       String expectedOrig = wm.replaceAll(RegExp(r'-wm\.', caseSensitive: false), '-orig.');
-      
-      // 简单的文件名匹配查找
       String? foundOrig;
       try {
         foundOrig = files.firstWhere((f) => f == expectedOrig);
       } catch (e) {
-        // 尝试模糊匹配 (忽略大小写)
         try {
           foundOrig = files.firstWhere((f) => f.toLowerCase() == expectedOrig.toLowerCase());
         } catch (_) {}
       }
-
       if (foundOrig != null) {
         tasks.add({'wm': wm, 'clean': foundOrig});
       }
     }
 
     if (tasks.isEmpty) {
-      _addLog("❌ 未找到匹配的图片对。\n请确保文件名包含 -wm 和 -orig");
+      _showDialog("配对失败", "未找到符合规则的图片对。\n\n请确保：\n1. 水印图文件名包含 -wm\n2. 原图文件名包含 -orig");
     } else {
-      _addLog("✅ 匹配到 ${tasks.length} 组图片，开始处理...");
       _runNativeRepair(tasks);
     }
   }
 
-  // --- 调用 Kotlin 原生方法 ---
   Future<void> _runNativeRepair(List<Map<String, String>> tasks) async {
     setState(() => _isProcessing = true);
-    
     try {
-      // 告诉 Kotlin 开始干活
-      final int successCount = await platform.invokeMethod('processImages', {
+      // Kotlin 返回的是一个 Map
+      final result = await platform.invokeMethod('processImages', {
         'tasks': tasks,
         'confidence': _confidence,
-        'search_ratio': [0.0, 0.0, 1.0, 1.0], // 全图搜索
       });
 
-      _addLog("🎉 处理完成！成功修复 $successCount 张。\n已保存到相册/Pictures/LofterFixed");
-      Fluttertoast.showToast(msg: "处理完成");
+      final int count = result['count'];
+      final String lastPath = result['lastPath'] ?? "";
+
+      if (count > 0) {
+        _showSuccessDialog(count, lastPath);
+      } else {
+        _showDialog("提示", "处理完成，但没有图片被修复。");
+      }
+
     } on PlatformException catch (e) {
-      _addLog("❌ 错误: ${e.message}");
+      _showDialog("处理失败", "错误信息：\n${e.message}\n${e.details ?? ''}");
     } finally {
       setState(() => _isProcessing = false);
     }
   }
 
-  void _addLog(String msg) {
-    setState(() {
-      _log = "$msg\n\n$_log";
-    });
+  // --- 弹窗组件 ---
+  void _showDialog(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("确定"))],
+      ),
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("LOFTER 修复机"),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [Tab(text: "单张精修"), Tab(text: "批量处理")],
-        ),
-      ),
-      body: Column(
-        children: [
-          // 置信度调节
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("🕵️ 侦探置信度: ${(_confidence * 100).toInt()}%"),
-                Slider(
-                  value: _confidence,
-                  min: 0.1,
-                  max: 0.9,
-                  divisions: 8,
-                  label: _confidence.toString(),
-                  onChanged: (v) => setState(() => _confidence = v),
+  void _showSuccessDialog(int count, String previewPath) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(children: [Icon(Icons.check_circle, color: Colors.green), SizedBox(width: 8), Text("修复成功!")]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("成功处理了 $count 张图片。"),
+            const SizedBox(height: 8),
+            const Text("✅ 已保存到系统相册 (LofterFixed)", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
+            const SizedBox(height: 16),
+            if (previewPath.isNotEmpty) ...[
+              const Text("最新修复预览:", style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 8),
+              ClipRRect( // 尝试显示预览图，content:// 路径可能需要特殊处理，但这里先尝试
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(previewPath, height: 150, width: double.infinity, fit: BoxFit.cover, 
+                  errorBuilder: (_,__,___) => Container(
+                    height: 100, color: Colors.grey[200], 
+                    child: const Center(child: Text("预览加载中...请去相册查看")),
+                  ),
                 ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildSingleTab(),
-                _buildBatchTab(),
-              ],
-            ),
-          ),
-          // 日志区域
-          Container(
-            height: 150,
-            width: double.infinity,
-            color: Colors.black12,
-            padding: const EdgeInsets.all(8),
-            child: SingleChildScrollView(
-              child: Text(_log, style: const TextStyle(fontSize: 12)),
-            ),
-          )
+              ),
+            ]
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("太棒了")),
         ],
       ),
     );
   }
 
-  Widget _buildSingleTab() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+  @override
+  Widget build(BuildContext context) {
+    // 侧边栏内容
+    var drawerOptions = [
+      const ListTile(leading: Icon(Icons.home), title: Text("修复工坊")),
+      const ListTile(leading: Icon(Icons.book), title: Text("使用说明书")),
+      const ListTile(leading: Icon(Icons.info), title: Text("关于软件")),
+    ];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("LOFTER 修复机"),
+        bottom: _selectedIndex == 0 ? TabBar(controller: _tabController, tabs: const [Tab(text: "单张精修"), Tab(text: "批量处理")]) : null,
+      ),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            const UserAccountsDrawerHeader(
+              accountName: Text("LOFTER 修复机"),
+              accountEmail: Text("v1.0.0 Release"),
+              currentAccountPicture: CircleAvatar(backgroundColor: Colors.white, child: Icon(Icons.build, size: 30, color: Colors.teal)),
+              decoration: BoxDecoration(color: Colors.teal),
+            ),
+            for (int i = 0; i < drawerOptions.length; i++)
+              ListTile(
+                leading: (drawerOptions[i] as ListTile).leading,
+                title: (drawerOptions[i] as ListTile).title,
+                selected: _selectedIndex == i,
+                onTap: () => _onDrawerItemTapped(i),
+              ),
+          ],
+        ),
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    switch (_selectedIndex) {
+      case 0: return _buildRepairPage();
+      case 1: return _buildManualPage();
+      case 2: return _buildAboutPage();
+      default: return _buildRepairPage();
+    }
+  }
+
+  Widget _buildRepairPage() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
             children: [
-              _imgBtn("有水印图", _wmPath, true),
-              const Icon(Icons.add),
-              _imgBtn("无水印图", _noWmPath, false),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("🕵️ 侦探灵敏度: ${(_confidence * 100).toInt()}%"),
+                  Tooltip(
+                    message: "越低越容易发现水印，但也更容易误判",
+                    child: Icon(Icons.help_outline, size: 18, color: Colors.grey[600]),
+                  )
+                ],
+              ),
+              Slider(value: _confidence, min: 0.1, max: 0.9, divisions: 8, label: _confidence.toString(), onChanged: (v) => setState(() => _confidence = v)),
             ],
           ),
-          const SizedBox(height: 30),
-          FilledButton.icon(
-            onPressed: _isProcessing ? null : _processSingle,
-            icon: _isProcessing ? const SizedBox(width:20, height:20, child: CircularProgressIndicator(color:Colors.white, strokeWidth: 2)) : const Icon(Icons.build),
-            label: Text(_isProcessing ? "正在修复..." : "开始修复"),
-          )
-        ],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [_buildSingleTab(), _buildBatchTab()],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSingleTab() {
+    return Center(
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _imgBtn("有水印图", _wmPath, true),
+                const Icon(Icons.add, color: Colors.grey),
+                _imgBtn("无水印原图", _noWmPath, false),
+              ],
+            ),
+            const SizedBox(height: 40),
+            FilledButton.icon(
+              onPressed: _isProcessing ? null : _processSingle,
+              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15)),
+              icon: _isProcessing 
+                ? const SizedBox(width:20, height:20, child: CircularProgressIndicator(color:Colors.white, strokeWidth: 2)) 
+                : const Icon(Icons.auto_fix_high),
+              label: Text(_isProcessing ? "正在施法..." : "开始修复"),
+            ),
+            const SizedBox(height: 20),
+            const Text("结果将自动保存至相册 'LofterFixed'", style: TextStyle(color: Colors.grey, fontSize: 12)),
+          ],
+        ),
       ),
     );
   }
@@ -243,13 +314,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.folder_copy, size: 64, color: Colors.teal),
+          Icon(Icons.folder_zip, size: 80, color: Colors.teal.withOpacity(0.5)),
           const SizedBox(height: 20),
-          const Text("规则说明：\n水印图需包含 -wm\n无水印图需包含 -orig", textAlign: TextAlign.center),
+          const Text("批量处理模式", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          const Text("需手动选择多张图片，程序自动配对", style: TextStyle(color: Colors.grey)),
           const SizedBox(height: 30),
-          FilledButton(
+          OutlinedButton.icon(
             onPressed: _isProcessing ? null : _pickFilesBatch,
-            child: const Text("选择多张图片 (自动配对)"),
+            icon: const Icon(Icons.photo_library),
+            label: const Text("去相册选择图片"),
           ),
         ],
       ),
@@ -262,19 +336,79 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       child: Column(
         children: [
           Container(
-            width: 100,
-            height: 100,
+            width: 120, height: 120,
             decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(12),
+              color: Theme.of(context).colorScheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(16),
               image: path != null ? DecorationImage(image: FileImage(File(path)), fit: BoxFit.cover) : null,
-              border: Border.all(color: Colors.grey),
+              border: Border.all(color: Colors.grey.withOpacity(0.3)),
             ),
-            child: path == null ? const Icon(Icons.image, size: 40, color: Colors.grey) : null,
+            child: path == null 
+              ? Icon(isWm ? Icons.broken_image : Icons.image, size: 40, color: Colors.grey) 
+              : null,
           ),
           const SizedBox(height: 8),
-          Text(label),
+          Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
         ],
+      ),
+    );
+  }
+
+  // --- 说明书页面 ---
+  Widget _buildManualPage() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        Text("📖 使用说明书", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+        Divider(),
+        SizedBox(height: 10),
+        _ManualItem(icon: Icons.filter_1, title: "单张精修模式", content: "适用于少量修复。手动点击左边框选中有水印的图，右边框选中无水印的原图，点击修复即可。"),
+        _ManualItem(icon: Icons.filter_9_plus, title: "批量处理模式", content: "适用于大量图片。\n\n1. 请在相册中长按选择所有相关图片。\n2. 程序会根据文件名自动配对。\n\n⚠️ 命名规则：\n水印图需包含 '-wm' (如 abc-wm.jpg)\n原图需包含 '-orig' (如 abc-orig.jpg)"),
+        _ManualItem(icon: Icons.tune, title: "灵敏度调节", content: "如果修复失败（没反应），请尝试调低灵敏度（例如 30%）。\n如果修复位置错误，请尝试调高灵敏度。"),
+        _ManualItem(icon: Icons.save, title: "文件保存", content: "所有修复成功的图片都会自动保存到系统相册的 'LofterFixed' 相册中，您可以直接在相册APP中查看。"),
+      ],
+    );
+  }
+
+  Widget _buildAboutPage() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.handyman, size: 80, color: Colors.teal),
+          SizedBox(height: 20),
+          Text("LOFTER 修复机", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          Text("v1.0.0 by GitHub Actions", style: TextStyle(color: Colors.grey)),
+          SizedBox(height: 40),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40),
+            child: Text("基于 Flutter + Kotlin + YOLOv8 构建的端侧去水印工具。\n\n无需联网，保护隐私。", textAlign: TextAlign.center),
+          )
+        ],
+      ),
+    );
+  }
+}
+
+class _ManualItem extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String content;
+  const _ManualItem({required this.icon, required this.title, required this.content});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [Icon(icon, color: Colors.teal), const SizedBox(width: 10), Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))]),
+            const SizedBox(height: 8),
+            Text(content, style: TextStyle(color: Colors.grey[700], height: 1.5)),
+          ],
+        ),
       ),
     );
   }
