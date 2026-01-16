@@ -1,14 +1,18 @@
-name: Build Lofter Fixer (Respect Local)
-on: workflow_dispatch
+name: Flutter Build Signed Release
+on:
+  workflow_dispatch:
 
+# 📝 在这里修改你的 APP 名称
 env:
-  APP_NAME: "LOFTER去水印"
+  APP_NAME: "时书"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Setup Java
         uses: actions/setup-java@v3
@@ -20,101 +24,53 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.0'
+          channel: 'stable'
 
-      # 1. 智能重建工程 (保留你的代码)
-      - name: Recreate Android Project with User Logic
+      # 1. 生成工程
+      - name: Create Android Project
         run: |
-          mkdir -p user_backup
-          
-          # 备份 Kotlin 核心逻辑
-          if [ -f "android/app/src/main/kotlin/com/example/lofter_fixer/MainActivity.kt" ]; then
-             cp android/app/src/main/kotlin/com/example/lofter_fixer/MainActivity.kt user_backup/
-          fi
-          
-          # 备份你本地的 Manifest (既然你希望用本地的)
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-             cp android/app/src/main/AndroidManifest.xml user_backup/
+          if [ ! -d "android" ]; then
+            # 注意：内部项目名 my_diary_app 必须是英文，不要改这里
+            flutter create . --platforms android --project-name my_diary_app
           fi
 
-          # 重新生成骨架 (清除潜在的 Gradle 缓存错误)
-          rm -rf android
-          flutter create . --platforms android --project-name lofter_fixer
-
-          # 恢复代码
-          TARGET_DIR="android/app/src/main/kotlin/com/example/lofter_fixer"
-          mkdir -p $TARGET_DIR
-          cp user_backup/MainActivity.kt $TARGET_DIR/
-          
-          # 恢复 Manifest
-          if [ -f "user_backup/AndroidManifest.xml" ]; then
-             cp user_backup/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
-             echo "✅ Restored local AndroidManifest.xml"
-          else 
-             echo "⚠️ Local Manifest not found, using default."
-          fi
-
-      # 2. 自动生成 Gradle 配置 (这个还是脚本生成比较稳，防止版本冲突)
-      - name: Overwrite build.gradle
+      # 2. 🏷️ 强制修改中文名 (最稳妥的方法)
+      - name: Change App Name
         run: |
-          cat > android/app/build.gradle <<EOF
-          plugins {
-              id "com.android.application"
-              id "kotlin-android"
-              id "dev.flutter.flutter-gradle-plugin"
-          }
-          android {
-              namespace "com.example.lofter_fixer"
-              compileSdkVersion 34
-              ndkVersion flutter.ndkVersion
-              compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
-              kotlinOptions { jvmTarget = '1.8' }
-              defaultConfig {
-                  applicationId "com.example.lofter_fixer"
-                  minSdkVersion 24
-                  targetSdkVersion flutter.targetSdkVersion
-                  versionCode 1
-                  versionName "1.0"
-              }
-              buildTypes { release { signingConfig signingConfigs.debug } }
-          }
-          flutter { source '../..' }
-          dependencies {
-              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
-              implementation "org.tensorflow:tensorflow-lite:2.14.0"
-              implementation "org.tensorflow:tensorflow-lite-support:0.4.4"
-              implementation "com.quickbirdstudios:opencv:4.5.3.0"
-              implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1"
-          }
-          EOF
+          # 修改 Android 清单文件中的 label 属性
+          sed -i 's/android:label="[^"]*"/android:label="${{ env.APP_NAME }}"/g' android/app/src/main/AndroidManifest.xml
+          echo "✅ App name changed to: ${{ env.APP_NAME }}"
 
-      # 3. 放置模型
-      - name: Place TFLite Model
+      # 3. 修复环境
+      - name: Fix Android Environment
         run: |
-          mkdir -p android/app/src/main/assets
-          if [ -f "best_float16.tflite" ]; then
-            cp best_float16.tflite android/app/src/main/assets/
-          else
-            echo "❌ Error: Model not found!"
-            touch android/app/src/main/assets/best_float16.tflite
-          fi
+          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
+          sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
+          sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
 
-      - name: Fix Project Settings
-        run: sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
-
-      - name: Install Dependencies
-        run: flutter pub get
-
-      - name: Generate App Icon
+      # 4. 生成资源 (只生成图标，不生成名字了，因为名字上面改过了)
+      - name: Install Dependencies & Assets
         run: |
-          if [ -f "assets/images/icon.png" ]; then
-             dart run flutter_launcher_icons
-          fi
+          flutter pub get
+          echo "🎨 Generating App Icon..."
+          dart run flutter_launcher_icons
 
+      # 5. 恢复密钥
+      - name: Restore Keystore from Secrets
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > upload-keystore.jks
+          echo "storePassword=${{ secrets.KEY_PASSWORD }}" > android/key.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
+          echo "storeFile=../../upload-keystore.jks" >> android/key.properties
+
+      # 6. 打包
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
+      # 7. 上传
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LofterFixer-Release
+          name: diary-app-release
           path: build/app/outputs/flutter-apk/app-release.apk
