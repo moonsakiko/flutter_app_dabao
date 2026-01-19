@@ -9,11 +9,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.2
-  file_picker: ^8.0.0
-  permission_handler: ^11.3.0
+  cupertino_icons: ^1.0.8
+  file_picker: ^6.1.1 # Rolling back to a known stable version or standard recent version
+  permission_handler: ^11.3.1
   path_provider: ^2.1.2
-  flutter_animate: ^4.5.0
+  flutter_animate: ^4.5.2
   google_fonts: ^6.1.0
   glassmorphism: ^3.0.0
   
