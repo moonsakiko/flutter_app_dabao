@@ -1,76 +1,53 @@
-name: Flutter Build Signed Release
+name: Build Android App
+
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
-# 📝 在这里修改你的 APP 名称
 env:
-  APP_NAME: "时书"
-
+  APP_NAME: "PDF Pro"
+  
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Setup Java
+      - name: Set up Java
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Flutter
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.0'
           channel: 'stable'
-
-      # 1. 生成工程
-      - name: Create Android Project
+          
+      - name: Install NDK
+        run: |
+           # Chaquopy needs NDK
+           echo "y" | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
+           
+      - name: Create Android Project (Scaffold)
         run: |
           if [ ! -d "android" ]; then
-            # 注意：内部项目名 my_diary_app 必须是英文，不要改这里
-            flutter create . --platforms android --project-name my_diary_app
+             flutter create . --platforms android
           fi
+          # We have our own android folder, so this shouldn't overwrite if it exists.
+          # But to be safe, we rely on the repository's android folder.
+          
+      - name: Get Dependencies
+        run: flutter pub get
 
-      # 2. 🏷️ 强制修改中文名 (最稳妥的方法)
-      - name: Change App Name
-        run: |
-          # 修改 Android 清单文件中的 label 属性
-          sed -i 's/android:label="[^"]*"/android:label="${{ env.APP_NAME }}"/g' android/app/src/main/AndroidManifest.xml
-          echo "✅ App name changed to: ${{ env.APP_NAME }}"
-
-      # 3. 修复环境
-      - name: Fix Android Environment
-        run: |
-          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
-          sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
-          sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
-
-      # 4. 生成资源 (只生成图标，不生成名字了，因为名字上面改过了)
-      - name: Install Dependencies & Assets
-        run: |
-          flutter pub get
-          echo "🎨 Generating App Icon..."
-          dart run flutter_launcher_icons
-
-      # 5. 恢复密钥
-      - name: Restore Keystore from Secrets
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > upload-keystore.jks
-          echo "storePassword=${{ secrets.KEY_PASSWORD }}" > android/key.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
-          echo "storeFile=../../upload-keystore.jks" >> android/key.properties
-
-      # 6. 打包
-      - name: Build APK
+      - name: Build APK (Release)
         run: flutter build apk --release --target-platform android-arm64
-
-      # 7. 上传
+        
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: diary-app-release
+          name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk

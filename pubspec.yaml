@@ -1,7 +1,7 @@
-name: shishu_diary
-description: A modular diary app.
+name: pdf_tool_pro
+description: A powerful PDF tool app with Python backend.
 publish_to: 'none'
-version: 1.0.0+3 # 💡 版本号我帮你加了1，方便你直接更新
+version: 1.0.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -9,38 +9,21 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # 👇 核心依赖
-  flutter_localizations:
-    sdk: flutter
-  intl: ^0.18.0
-  shared_preferences: ^2.2.0
-  share_plus: ^7.2.0
-  file_picker: ^6.1.1
   cupertino_icons: ^1.0.2
-
+  file_picker: ^8.0.0
+  permission_handler: ^11.3.0
+  path_provider: ^2.1.2
+  flutter_animate: ^4.5.0
+  google_fonts: ^6.1.0
+  glassmorphism: ^3.0.0
+  
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_launcher_icons: ^0.13.1 # 自动化图标工具
-
-# 👇👇👇 【这里是漏掉的关键配置！请检查这里】 👇👇👇
-# 这一段告诉编译器：去哪里找图标文件来生成安卓图标
-flutter_launcher_icons:
-  android: "launcher_icon"
-  ios: false             # 必须关掉 ios，否则云打包会报错
-  image_path: "assets/images/icon.png" # ❗确保你的仓库里有这张图
-  min_sdk_android: 21
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
-  
-  # 👇👇👇 【图片资源注册】 👇👇👇
-  # 这一段告诉 APP：打包时要把 assets/images 文件夹里的图片（header.jpg等）带上
   assets:
     - assets/images/
-
-  # 👇 字体注册
-  fonts:
-    - family: MyFont
-      fonts:
-        - asset: assets/fonts/myfont.ttf
