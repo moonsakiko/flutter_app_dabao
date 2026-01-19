@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import '../services/python_service.dart';
+import '../services/pdf_service.dart';
 
 class ToolsPage extends StatefulWidget {
   const ToolsPage({super.key});
@@ -19,7 +19,7 @@ class _ToolsPageState extends State<ToolsPage> {
     if (path != null) setState(() => _folder = path);
   }
 
-  Future<void> _runScript(String scriptName, String label) async {
+  Future<void> _runScript(String action, String label) async {
     if (_folder == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Select a folder first")));
       return;
@@ -30,16 +30,25 @@ class _ToolsPageState extends State<ToolsPage> {
       _logs = "Running $label...\n";
     });
 
-    // Capture local variable for null promotion
     final String targetFolder = _folder!;
-    final args = {
-        'source_folder': targetFolder, // for add bookmarks
-        'input_folder': targetFolder,  // for tools
-        'output_folder': targetFolder + "/output",
-        'offset': 0
-    };
+    final String outputFolder = "$targetFolder/output"; // Simple output path
 
-    final result = await PythonService.runScript(scriptName, args);
+    Map<String, dynamic> result;
+
+    if (action == 'extract') {
+        result = await PdfService.extractBookmarks(
+            inputFolder: targetFolder, 
+            outputFolder: outputFolder
+        );
+    } else if (action == 'add_bookmarks') {
+        result = await PdfService.addBookmarks(
+            sourceFolder: targetFolder, 
+            outputFolder: outputFolder, 
+            offset: 0
+        );
+    } else {
+        result = {'success': false, 'logs': 'Unknown action'};
+    }
 
     setState(() {
       _isRunning = false;
@@ -73,12 +82,9 @@ class _ToolsPageState extends State<ToolsPage> {
             child: ListView(
                padding: const EdgeInsets.symmetric(horizontal: 16),
                children: [
-                 ElevatedButton.icon(
-                   icon: const Icon(Icons.analytics),
-                   label: const Text("Run Inspector (Analyze PDF)"),
-                   onPressed: _isRunning ? null : () => _runScript('inspector', 'Inspector'),
-                 ),
-                 const SizedBox(height: 10),
+                 // Inspector removed for now as it relies on complex python logic
+                 // Could re-add if we implement inspection in Dart
+                 
                  ElevatedButton.icon(
                    icon: const Icon(Icons.file_upload),
                    label: const Text("Extract Bookmarks to TXT"),
@@ -108,3 +114,4 @@ class _ToolsPageState extends State<ToolsPage> {
     );
   }
 }
+

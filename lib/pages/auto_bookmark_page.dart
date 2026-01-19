@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import '../services/python_service.dart';
+import '../services/pdf_service.dart';
 
 class AutoBookmarkPage extends StatefulWidget {
   const AutoBookmarkPage({super.key});
@@ -40,29 +40,18 @@ class _AutoBookmarkPageState extends State<AutoBookmarkPage> {
       _logs = "Starting task...\n";
     });
 
-    // Build Config JSON
-    // Only implemented level 1 basic for demo, full config would be a larger form
     final config = {
       "level1": {
         "regex": _level1Regex.text,
         "font_size": int.tryParse(_level1Size.text) ?? 15
-      },
-      "level2": {
-         "regex": r"^\s*[一二三四五六七八九十百]+、\s*\S+",
-         "font_size": 12
-      },
-      "exclusion": {
-          "min_y_coord": 50,
-          "max_y_coord": 800,
-          "max_line_length": 40
       }
     };
 
-    final result = await PythonService.runScript('auto_shuqian', {
-      'input_folder': _inputFolder,
-      'output_folder': _outputFolder,
-      'config': config
-    });
+    final result = await PdfService.runAutoBookmark(
+      inputFolder: _inputFolder!,
+      outputFolder: _outputFolder!,
+      config: config
+    );
 
     setState(() {
       _isRunning = false;
@@ -70,7 +59,7 @@ class _AutoBookmarkPageState extends State<AutoBookmarkPage> {
       if (result['success'] == true) {
          currentLogs += "\n DONE!";
       } else {
-         currentLogs += "\n FAILED: " + (result['message'] ?? "Unknown error");
+         currentLogs += "\n FAILED: " + (result['message'] ?? "");
       }
       _logs = currentLogs;
     });
@@ -94,13 +83,13 @@ class _AutoBookmarkPageState extends State<AutoBookmarkPage> {
                  const SizedBox(height: 10),
                  TextField(
                    controller: _level1Regex,
-                   decoration: const InputDecoration(labelText: "Level 1 Regex", border: OutlineInputBorder()),
+                   decoration: const InputDecoration(labelText: "Level 1 Regex (Dart)", border: OutlineInputBorder()),
                  ),
                  const SizedBox(height: 10),
                  TextField(
                    controller: _level1Size,
                    keyboardType: TextInputType.number,
-                   decoration: const InputDecoration(labelText: "Level 1 Min Font Size", border: OutlineInputBorder()),
+                   decoration: const InputDecoration(labelText: "Level 1 Min Line Height (approx pts)", border: OutlineInputBorder()),
                  ),
               ],
             ),

@@ -2,7 +2,6 @@ plugins {
     id "com.android.application"
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
-    id "com.chaquo.python"
 }
 
 def localProperties = new Properties()
@@ -47,25 +46,6 @@ android {
         targetSdkVersion 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
-
-        ndk {
-            // Chaquopy requires these ABIs
-            abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
-        }
-
-        python {
-            version "3.9" // Python version to use
-            pip {
-            pip {
-                // Install dependencies
-                // Force older cryptography to ensure wheel availability (avoid rust compilation)
-                install "cryptography<42" 
-                install "pdfminer.six"
-                install "pypdf"
-                install "Pillow"
-            }
-            }
-        }
     }
 
     buildTypes {
