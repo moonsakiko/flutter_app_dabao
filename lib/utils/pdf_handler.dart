@@ -74,21 +74,22 @@ class PdfHandler {
     String finalPath = adjacentPath;
     
     try {
-      // Logic: If path contains 'cache', it means we are in sandbox and adjacent write is useless/invisible.
-      // In this case, throw immediately to trigger fallback to Downloads.
-      if (adjacentPath.contains('cache')) {
-         throw FileSystemException("Cache path detected");
-      }
+      // 1. Try adjacent saving (ideal)
       await File(adjacentPath).writeAsBytes(await document.save());
     } catch (e) {
-      final downloadDir = Directory('/storage/emulated/0/Download');
-      if (downloadDir.existsSync()) {
-        final appDir = Directory("${downloadDir.path}/${AppConfig.appName}");
-        if (!appDir.existsSync()) appDir.createSync(recursive: true);
-        finalPath = "${appDir.path}/${nameWithoutExt}_new.pdf";
-        await File(finalPath).writeAsBytes(await document.save());
-      } else {
-         rethrow;
+      // 2. Fallback to Downloads if adjacent is read-only (e.g. cache/URI)
+      try {
+        final downloadDir = Directory('/storage/emulated/0/Download');
+        if (downloadDir.existsSync()) {
+           final appDir = Directory("${downloadDir.path}/${AppConfig.appName}");
+           if (!appDir.existsSync()) appDir.createSync(recursive: true);
+           finalPath = "${appDir.path}/${nameWithoutExt}_new.pdf";
+           await File(finalPath).writeAsBytes(await document.save());
+        } else {
+           rethrow; // If no download dir, crash to UI
+        }
+      } catch (e2) {
+         rethrow; // Final give up
       }
     }
     

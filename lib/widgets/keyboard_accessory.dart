@@ -6,7 +6,7 @@ class KeyboardAccessory extends StatelessWidget {
   final VoidCallback onBasePage;
   final VoidCallback onOffset;
   final VoidCallback onClear;
-  final VoidCallback onPreview;
+  final VoidCallback onPaste; // New: Paste
   final VoidCallback onHideKeyboard;
 
   const KeyboardAccessory({
@@ -16,7 +16,7 @@ class KeyboardAccessory extends StatelessWidget {
     required this.onBasePage,
     required this.onOffset,
     required this.onClear,
-    required this.onPreview,
+    required this.onPaste, // Replaces Preview
     required this.onHideKeyboard,
   });
 
@@ -31,23 +31,27 @@ class KeyboardAccessory extends StatelessWidget {
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row( // Nested Row for scrollable items
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildBtn(Icons.keyboard_tab, "缩进", onTab),
-                  _buildBtn(Icons.west, "反缩进", onUntab),
-                  const VerticalDivider(width: 20, indent: 10, endIndent: 10),
-                  // Updated Icon: format_list_numbered
-                  _buildBtn(Icons.format_list_numbered, "设置初始页码", onBasePage), 
-                  _buildBtn(Icons.exposure, "整体偏移", onOffset),
-                  const VerticalDivider(width: 20, indent: 10, endIndent: 10),
-                  _buildBtn(Icons.visibility, "预览", onPreview),
-                  _buildBtn(Icons.keyboard_hide, "收起", onHideKeyboard),
+                   _buildBtn(Icons.keyboard_tab, "缩进", onTab),
+                   _buildBtn(Icons.west, "反缩进", onUntab),
+                   const VerticalDivider(width: 20, indent: 10, endIndent: 10),
+                   // Icon: Architecture (Neutral, like caliper/divider user showed)
+                   _buildBtn(Icons.architecture, "设置初始页码", onBasePage), 
+                   _buildBtn(Icons.exposure, "整体偏移", onOffset),
+                   const VerticalDivider(width: 20, indent: 10, endIndent: 10),
+                   // Swap Hide and Paste Position?
+                   // User said: "Lastly swap (Paste) and Keyboard Hide".
+                   // Original order was: ... [Preview/Paste] [Hide]
+                   // Swapped: [Hide] [Paste]
+                   _buildBtn(Icons.keyboard_hide, "收起", onHideKeyboard),
+                   _buildBtn(Icons.content_paste, "粘贴", onPaste), // Paste icon
                 ],
               ),
             ),
           ),
-          // Clear button fixed at the right
+          // Clear fixed to right
           const VerticalDivider(width: 1, indent: 10, endIndent: 10),
           _buildBtn(Icons.delete_sweep, "清空", onClear, color: Colors.red),
           const SizedBox(width: 8),

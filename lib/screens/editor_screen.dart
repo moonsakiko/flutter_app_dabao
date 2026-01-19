@@ -5,6 +5,7 @@ import 'dart:io';
 import '../config/app_config.dart';
 import '../utils/text_parser.dart';
 import '../utils/pdf_handler.dart';
+import 'package:flutter/services.dart';
 import '../widgets/keyboard_accessory.dart';
 
 class EditorScreen extends StatefulWidget {
@@ -142,6 +143,32 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
         TextButton(onPressed: () { _textCtrl.clear(); Navigator.pop(ctx); }, child: const Text("清空", style: TextStyle(color: Colors.red))),
       ]
     ));
+  }
+
+  Future<void> _pasteFromClipboard() async {
+     final data = await Clipboard.getData(Clipboard.kTextPlain);
+     if (data != null && data.text != null) {
+       final text = _textCtrl.text;
+       final selection = _textCtrl.selection;
+       
+       String newContent;
+       int newOffset;
+       
+       if (selection.start == -1) {
+         // Append
+         newContent = text + data.text!;
+         newOffset = newContent.length;
+       } else {
+         // Insert/Replace
+         newContent = text.replaceRange(selection.start, selection.end, data.text!);
+         newOffset = selection.start + data.text!.length;
+       }
+       
+       _textCtrl.value = TextEditingValue(
+         text: newContent,
+         selection: TextSelection.collapsed(offset: newOffset),
+       );
+     }
   }
 
   // --- Advanced Tools ---
@@ -307,7 +334,7 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
                          onBasePage: _showBasePageDialog,
                          onOffset: _showOffsetDialog,
                          onClear: _clearAll,
-                         onPreview: () { _focusNode.unfocus(); _tabController.animateTo(1); },
+                         onPaste: _pasteFromClipboard,
                          onHideKeyboard: () => _focusNode.unfocus(),
                       ),
                       Expanded(
