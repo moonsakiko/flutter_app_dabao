@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  APP_NAME: "PDF Pro"
+  APP_NAME: "PDF书签工具箱" # Default Chinese Name
   
 jobs:
   build:
@@ -20,6 +20,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          
+      - name: Update App Name (Manifest)
+        run: |
+           # Use sed to replace the label in AndroidManifest
+           sed -i 's/android:label="PDF Tool Pro"/android:label="${{ env.APP_NAME }}"/g' android/app/src/main/AndroidManifest.xml || true
+           # Also replace config in scaffold if needed, but manifest is primary display name
+           
+      - name: Set up Flutter
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2

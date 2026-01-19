@@ -18,21 +18,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _requestPermission() async {
-    // For Android 11+
-    if (await Permission.manageExternalStorage.request().isGranted) {
-      return;
-    }
-    // Fallback for older Android
-    if (await Permission.storage.request().isGranted) {
-      return;
-    }
+    if (await Permission.manageExternalStorage.request().isGranted) return;
+    if (await Permission.storage.request().isGranted) return;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("PDF Tool Pro"),
+        title: const Text("PDF 工具箱"),
         centerTitle: true,
       ),
       body: ListView(
@@ -41,8 +35,8 @@ class _HomePageState extends State<HomePage> {
           _buildFeatureCard(
             context,
             icon: Icons.auto_stories,
-            title: "Auto Bookmarks",
-            subtitle: "Generate outline from text rules",
+            title: "自动生成书签",
+            subtitle: "通过正则规则智能识别章节标题",
             color: Colors.blueAccent,
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AutoBookmarkPage())),
           ),
@@ -50,8 +44,8 @@ class _HomePageState extends State<HomePage> {
           _buildFeatureCard(
             context,
             icon: Icons.bookmark_add,
-            title: "Manual Tools",
-            subtitle: "Add/Extract bookmarks & Inspect",
+            title: "书签工具",
+            subtitle: "导出/导入书签，手动调整",
             color: Colors.orangeAccent,
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ToolsPage())),
           ),

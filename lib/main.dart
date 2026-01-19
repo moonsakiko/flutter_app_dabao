@@ -12,23 +12,23 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'PDF Tool Pro',
+      title: 'PDF 工具箱',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepPurple,
+          seedColor: Colors.blueAccent,
           brightness: Brightness.light,
         ),
-        textTheme: GoogleFonts.outfitTextTheme(),
+        textTheme: GoogleFonts.notoSansScTextTheme(), // Better for Chinese if available, or fallback
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepPurple,
+          seedColor: Colors.blueAccent,
           brightness: Brightness.dark,
         ),
-        textTheme: GoogleFonts.outfitTextTheme(ThemeData.dark().textTheme),
+         textTheme: GoogleFonts.notoSansScTextTheme(ThemeData.dark().textTheme),
       ),
       themeMode: ThemeMode.system,
       home: const HomePage(),
