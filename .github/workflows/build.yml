@@ -44,6 +44,11 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
+      - name: Generate Assets (Icons)
+        run: |
+          echo "🎨 Generating App Icon..."
+          dart run flutter_launcher_icons
+
       - name: Build APK (Release)
         run: flutter build apk --release --target-platform android-arm64
         

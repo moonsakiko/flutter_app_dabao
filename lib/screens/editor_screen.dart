@@ -222,24 +222,28 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("当前行检测页码: ${currentPage == 0 ? '未知' : currentPage}"),
-            const SizedBox(height: 8),
-            TextField(controller: ctrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "修改为 (逻辑页码)", hintText: "例如: 1")),
-            const SizedBox(height: 8),
-            const Text("说明: 若您输入 1，软件将计算 (1 - 当前页码) 的差值，并应用到所有选中行 (或全文)。", style: TextStyle(fontSize: 12, color: Colors.grey)),
+             const Text("请输入书籍目录中“第1页”对应 PDF 文件的实际页码："),
+             const SizedBox(height: 8),
+             TextField(controller: ctrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "PDF 实际页码", hintText: "例如: 15 (即前言有14页)")),
+             const SizedBox(height: 8),
+             const Text("说明: 系统将自动计算偏移量 (输入值 - 1)，并加到所有页码上。\n例如输入 15，则所有页码 +14。", style: TextStyle(fontSize: 12, color: Colors.grey)),
           ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
           TextButton(onPressed: () {
-            int target = int.tryParse(ctrl.text) ?? 0;
-            if (target > 0 && currentPage > 0) {
-               int delta = target - currentPage;
-               Navigator.pop(ctx);
-               _applyToSelection((t, p) => p + delta);
-            } else if (target > 0 && currentPage == 0) {
+            int pdfPageOne = int.tryParse(ctrl.text) ?? 0;
+            if (pdfPageOne > 0) {
               Navigator.pop(ctx);
-               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("无法检测当前行页码，请先将光标移至包含有效页码的书签行。")));
+               // Algorithm: Book Page 1 is PDF Page X.
+               // Default Book Page is P. Actual PDF Page should be P + (X - 1).
+               // Delta = X - 1.
+               int delta = pdfPageOne - 1;
+               if (delta != 0) {
+                 _applyToSelection((t, p) => p + delta);
+               } else {
+                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("偏移量为0，无需修改")));
+               }
             } else {
               Navigator.pop(ctx);
             }
