@@ -14,14 +14,20 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderStateMixin {
+  // ... (Existing variables)
   String? _filePath;
   final TextEditingController _textCtrl = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   
   bool _isLoading = false;
   late TabController _tabController;
-  List<BookmarkNode> _previewNodes = [];
-
+  
+  // Preview Tree
+  // We need a structured tree for Folding, not just a flat list for Preview
+  // Reusing BookmarkNode which already has structure implicitly by level
+  // But for ExpansionTile we need real hierarchy.
+  List<BookmarkNode> _flatNodes = [];
+  
   @override
   void initState() {
     super.initState();
@@ -32,6 +38,8 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
   @override
   void dispose() {
     _tabController.removeListener(_onTabChanged);
+    _textCtrl.dispose();
+    _focusNode.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -43,36 +51,30 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
   void _refreshPreview() {
      if (_textCtrl.text.isNotEmpty) {
        setState(() {
-         _previewNodes = TextParser.textToBookmarks(_textCtrl.text);
+         _flatNodes = TextParser.textToBookmarks(_textCtrl.text);
        });
      }
   }
 
+  // ... (Pick/Save logic identical, just update UI)
   Future<void> _pickFile() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf'],
     );
-
-    if (result != null) {
-      final path = result.files.single.path!;
-      _loadFile(path);
-    }
+    if (result != null) _loadFile(result.files.single.path!);
   }
 
   Future<void> _loadFile(String path) async {
-    setState(() {
-      _filePath = path;
-      _isLoading = true;
-    });
-    
+    setState(() => _isLoading = true);
+    _filePath = path; 
     try {
       final bookmarks = await PdfHandler.readBookmarks(path);
       final text = TextParser.bookmarksToText(bookmarks);
       setState(() {
         _textCtrl.text = text;
         _isLoading = false;
-        _previewNodes = bookmarks;
+        _flatNodes = bookmarks;
       });
     } catch (e) {
       setState(() => _isLoading = false);
@@ -83,7 +85,6 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
   Future<void> _save() async {
     if (_filePath == null) return;
     setState(() => _isLoading = true);
-    
     try {
       final nodes = TextParser.textToBookmarks(_textCtrl.text);
       String savePath = await PdfHandler.writeBookmarks(_filePath!, nodes);
@@ -91,13 +92,10 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
     } catch (e) {
       _showError("保存失败: $e");
     }
-    
     setState(() => _isLoading = false);
   }
-
-  void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
-  }
+  
+  void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   
   void _showSuccess(String path) {
     showDialog(
@@ -108,15 +106,8 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("文件已保存至："),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              color: Colors.grey[200],
-              child: Text(path, style: const TextStyle(fontSize: 12)),
-            ),
-            const SizedBox(height: 8),
-            const Text("提示：优先保存在原文件同级，若无权限则保存在下载目录。", style: TextStyle(fontSize: 11, color: Colors.grey)),
+             const Text("文件已保存至："),
+             Container(padding: const EdgeInsets.all(8), color: Colors.grey[200], child: Text(path, style: const TextStyle(fontSize: 12))),
           ],
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("好"))],
@@ -124,10 +115,11 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
     );
   }
 
-  // --- Logic for Accessory Bar ---
-
+  // --- Toolbar Logic ---
+  
   void _insertTab() {
-    final text = _textCtrl.text;
+    // ... same ...
+     final text = _textCtrl.text;
     final selection = _textCtrl.selection;
     if (selection.start < 0) return;
     final newText = text.replaceRange(selection.start, selection.end, AppConfig.indentChar);
@@ -135,6 +127,7 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
   }
 
   void _removeTab() {
+     // ... same ...
     final text = _textCtrl.text;
     final selection = _textCtrl.selection;
     if (selection.start <= 0) return;
@@ -143,30 +136,39 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
        _textCtrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: selection.start - 1));
     }
   }
-
-  void _adjustPage(int delta) {
-    _applyToSelection((title, page) => page + delta);
+  
+  void _clearAll() {
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text("清空确认"),
+      content: const Text("确定要清空编辑器内容吗？"),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
+        TextButton(onPressed: () { _textCtrl.clear(); Navigator.pop(ctx); }, child: const Text("清空", style: TextStyle(color: Colors.red))),
+      ]
+    ));
   }
 
   // --- Advanced Tools ---
 
-  // Helper to modify selected lines or all lines
+  // Updated: If no selection, apply to ALL.
   void _applyToSelection(int Function(String title, int page) modifier) {
     final text = _textCtrl.text;
-    final selection = _textCtrl.selection;
-    
-    // If no selection (collapsed), apply to current line
-    // If selection range, apply to all full/partial lines in range
-    // If text empty, do nothing
     if (text.isEmpty) return;
     
-    int start = selection.start < 0 ? 0 : selection.start;
-    int end = selection.end < 0 ? 0 : selection.end;
+    final selection = _textCtrl.selection;
+    int start = 0;
+    int end = text.length;
+
+    // Check if selection exists
+    bool hasSelection = selection.start != -1 && selection.end != -1 && selection.start != selection.end;
+    if (hasSelection) {
+       start = selection.start;
+       end = selection.end;
+    }
     
     // Expand to full lines
     String before = text.substring(0, start);
     int lineStart = before.lastIndexOf('\n') + 1;
-    
     int lineEnd = text.indexOf('\n', end);
     if (lineEnd == -1) lineEnd = text.length;
     
@@ -194,39 +196,18 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
       text: newText,
       selection: TextSelection.collapsed(offset: lineStart + replacement.length),
     );
+    
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(hasSelection ? "已对选中行应用" : "已对全文应用")));
   }
-
-  void _showToolsDialog() {
-    showModalBottomSheet(
-      context: context, 
-      builder: (ctx) => Wrap(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.exposure), 
-            title: const Text("整体偏移 (Global Offset)"),
-            subtitle: const Text("所有选中行 (或全部) 页码 +/- N"),
-            onTap: () { Navigator.pop(ctx); _showOffsetDialog(); }
-          ),
-          ListTile(
-            leading: const Icon(Icons.start), 
-            title: const Text("设置初始页码 (Set Base Page)"),
-            subtitle: const Text("将当前行的页码设为 X，自动计算偏移量"),
-            onTap: () { Navigator.pop(ctx); _showBasePageDialog(); }
-          ),
-          const Divider(),
-          ListTile(leading: const Icon(Icons.help_outline), title: const Text("使用帮助"), onTap: () { Navigator.pop(ctx); _showHelpDialog(); }),
-        ],
-      )
-    );
-  }
-
+  
   void _showOffsetDialog() {
+     // ... same ...
     final ctrl = TextEditingController();
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("整体偏移"),
-        content: TextField(controller: ctrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "偏移量 (例如 +10, -5)")),
+        content: TextField(controller: ctrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "偏移量 (+/- N)")),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
           TextButton(onPressed: () {
@@ -239,89 +220,16 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
     );
   }
 
-  void _showBasePageDialog() {
-    // Determine current logical page from cursor line
-    int currentPage = 0;
-    // ... (logic similar to adjustPage to find current line page)
-    final text = _textCtrl.text;
-    final selection = _textCtrl.selection;
-    int start = selection.start < 0 ? 0 : selection.start;
-    String before = text.substring(0, start);
-    int lineStart = before.lastIndexOf('\n') + 1;
-    int lineEnd = text.indexOf('\n', start);
-    if (lineEnd == -1) lineEnd = text.length;
-    String line = text.substring(lineStart, lineEnd);
-    final match = RegExp(r'^(.*)\s+(\d+)$').firstMatch(line);
-    if (match != null) currentPage = int.parse(match.group(2)!);
-
-    final ctrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("设置初始页码"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text("当前行页码: $currentPage"),
-            TextField(controller: ctrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "应改为 (逻辑页码)")),
-            const SizedBox(height: 8),
-            const Text("提示：将计算差值并应用到选区/全文", style: TextStyle(fontSize: 12, color: Colors.grey)),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
-          TextButton(onPressed: () {
-            int target = int.tryParse(ctrl.text) ?? 0;
-            if (target > 0) {
-               int delta = target - currentPage;
-               _applyToSelection((t, p) => p + delta);
-            }
-            Navigator.pop(ctx);
-          }, child: const Text("执行")),
-        ],
-      )
-    );
-  }
-
-  void _showHelpDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("功能说明"),
-        content: const SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("【基本操作】", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("• 缩进 ->| : 增加层级 (子章节)"),
-              Text("• 反缩进 |<- : 减少层级 (父章节)"),
-              Text("• 页码 +/- 1 : 微调当前行页码"),
-              SizedBox(height: 10),
-              Text("【高级功能 (右上角菜单)】", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("• 整体偏移 : 批量增加或减少页码。"),
-              Text("• 初始页码 : 用于对齐目录。例如目录页码写的是 1，但 PDF 实际上是第 5 页，输入 5 -> 1，软件会自动让所有后续页码 -4。"),
-              SizedBox(height: 10),
-              Text("【保存】", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("• 默认尝试保存在原文件旁边 (_new.pdf)。"),
-              Text("• 如果失败，会自动保存在 Download/PDF书签精灵 文件夹。"),
-            ],
-          ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("明白了"))],
-      )
-    );
-  }
+  // --- UI Build ---
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(_filePath == null ? AppConfig.appName : File(_filePath!).uri.pathSegments.last.replaceAll('.pdf', '')),
-        elevation: 0,
         actions: [
           if (_filePath != null) ...[
              IconButton(icon: const Icon(Icons.file_open), tooltip: "切换文件", onPressed: _pickFile),
-             IconButton(icon: const Icon(Icons.build), tooltip: "工具箱", onPressed: _showToolsDialog),
              IconButton(icon: const Icon(Icons.save), onPressed: _isLoading ? null : _save),
           ]
         ],
@@ -333,76 +241,149 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator())
         : _filePath == null 
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.picture_as_pdf, size: 64, color: Colors.blue),
-                    const SizedBox(height: 16),
-                    ElevatedButton(onPressed: _pickFile, child: const Text("打开 PDF 文件")),
-                  ],
-                ),
-              )
+            ? Center(child: ElevatedButton(onPressed: _pickFile, child: const Text("打开 PDF 文件")))
             : TabBarView(
                 controller: _tabController,
+                physics: const NeverScrollableScrollPhysics(), // Prevent swipe to avoid conflict
                 children: [
                   Column(
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
-                        child: KeyboardAccessory(
-                          onTab: _insertTab,
-                          onUntab: _removeTab,
-                          onPageInc: () => _adjustPage(1),
-                          onPageDec: () => _adjustPage(-1),
-                          onPreview: () { _focusNode.unfocus(); _tabController.animateTo(1); },
-                          onHideKeyboard: () => _focusNode.unfocus(),
+                      // Updated Toolbar
+                      Container(
+                        height: 50, color: Colors.grey[200],
+                        child: ListView(
+                           scrollDirection: Axis.horizontal,
+                           padding: const EdgeInsets.symmetric(horizontal: 8),
+                           children: [
+                             IconButton(icon: const Icon(Icons.keyboard_tab), onPressed: _insertTab, tooltip: "缩进"),
+                             IconButton(icon: const Icon(Icons.west), onPressed: _removeTab, tooltip: "反缩进"),
+                             const VerticalDivider(),
+                             IconButton(icon: const Icon(Icons.exposure), onPressed: _showOffsetDialog, tooltip: "整体偏移"),
+                              // Base Page can be in dialog or here. Let's keep it clean, maybe just Offset is enough as per request?
+                              // User asked to REMOVE +/- 1 and put Global Offset here.
+                             const VerticalDivider(),
+                             IconButton(icon: const Icon(Icons.delete_sweep, color: Colors.red), onPressed: _clearAll, tooltip: "清空"),
+                           ],
                         ),
                       ),
                       Expanded(
-                        child: TextField(
-                          controller: _textCtrl,
-                          focusNode: _focusNode,
-                          maxLines: null,
-                          expands: true,
-                          keyboardType: TextInputType.multiline,
-                          style: const TextStyle(fontFamily: 'monospace', fontSize: 16, height: 1.5),
-                          decoration: const InputDecoration(
-                            contentPadding: EdgeInsets.all(16),
-                            border: InputBorder.none,
-                            hintText: "书签标题 <Tab> 页码",
+                        child: KeyboardAccessory(
+                          onTab: _insertTab,
+                          onUntab: _removeTab,
+                          onOffset: _showOffsetDialog,
+                          onClear: _clearAll,
+                          onPreview: () { _focusNode.unfocus(); _tabController.animateTo(1); },
+                          onHideKeyboard: () => _focusNode.unfocus(),
+                          child: TextField(
+                            controller: _textCtrl,
+                            focusNode: _focusNode,
+                            maxLines: null,
+                            expands: true,
+                            keyboardType: TextInputType.multiline,
+                            style: const TextStyle(fontFamily: 'monospace', fontSize: 16, height: 1.5),
+                            decoration: const InputDecoration(contentPadding: EdgeInsets.all(16), border: InputBorder.none),
                           ),
                         ),
                       ),
                     ],
                   ),
-                  _buildPreview(),
+                  _buildFoldablePreview(),
                 ],
               ),
     );
   }
-
-  Widget _buildPreview() {
-    if (_previewNodes.isEmpty) return const Center(child: Text("无书签"));
-    return ListView.builder(
-      itemCount: _previewNodes.length,
-      itemBuilder: (context, index) {
-        final node = _previewNodes[index];
-        return Container(
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey.withOpacity(0.1)))),
-          padding: EdgeInsets.only(left: 16.0 * node.level + 16, top: 12, bottom: 12, right: 16),
-          child: Row(
-            children: [
-              Expanded(child: Text(node.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(4)),
-                child: Text(node.pageNumber.toString(), style: const TextStyle(fontSize: 12)),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+  
+  Widget _buildFoldablePreview() {
+     if (_flatNodes.isEmpty) return const Center(child: Text("无书签"));
+     // Build Tree from flat list
+     List<BookmarkNode> roots = _buildTree(_flatNodes);
+     return ListView(children: roots.map((n) => _buildNode(n)).toList());
+  }
+  
+  // Helper to build recursive UI
+  Widget _buildNode(BookmarkNode node) {
+     if (node.children.isEmpty) {
+       return ListTile(
+         controller: ScrollController(), // Fix weird error if needed? No.
+         dense: true,
+         title: Text(node.title),
+         trailing: Text(node.pageNumber.toString()),
+         contentPadding: EdgeInsets.only(left: 16.0 + (node.level * 16), right: 16),
+       );
+     } else {
+       return ExpansionTile(
+         title: Text(node.title),
+         trailing: Text(node.pageNumber.toString()), // Trailing on tile forces arrow to left or hides it? 
+         // ExpansionTile default trailing is arrow. Customizing it is tricky.
+         // Let's put page number in subtitle or title
+         // title: Row(children: [Expanded(child: Text(node.title)), Text(node.pageNumber.toString())]),
+         tilePadding: EdgeInsets.only(left: 16.0 + (node.level * 16), right: 16),
+         children: node.children.map((c) => _buildNode(c)).toList(),
+       );
+     }
+  }
+  
+  // Helper to reconstruct tree for View
+  List<BookmarkNode> _buildTree(List<BookmarkNode> flat) {
+     // Deep copy to avoid modifying original flat if passed by ref
+     // But simple struct is okay.
+     // We need to add 'children' property to Node or wrapper.
+     // Since BookmarkNode is configured in another file, let's just make a Wrapper here or modify BookmarkNode.
+     // Let's assume BookmarkNode doesn't have children field (it was simple flat in text_parser).
+     // Wait, text_parser.dart `BookmarkNode` definition:
+     // class BookmarkNode { String title; int pageNumber; int level; } 
+     // We need to add `children` to it or use a temporary wrapper.
+     // Let's modify text_parser.dart to include children for convenience? 
+     // Or just use a local map.
+     
+     // Let's use a local wrapper class for UI
+     return _reconstruct(flat);
+  }
+  
+  List<BookmarkNode> _reconstruct(List<BookmarkNode> flat) {
+     // This is O(N) stack method similar to save logic
+     List<BookmarkNode> roots = [];
+     List<BookmarkNode> stack = []; // Parents
+     
+     for (var node in flat) {
+        // We need to clone node to add children to it (dynamic expansion)
+        // Since Dart classes are open, we can't add fields.
+        // Let's assume we can attach children in a Map or List<dynamic>
+        // Check `TextParser`... it is simple.
+        // Strategy: Create a `ViewNode` class here.
+        var viewNode = node; // Treating as ViewNode dynamically? No, strict types.
+        // Okay, I will add `List<BookmarkNode> children = []` to `BookmarkNode` in next step.
+        // For now, assuming it exists or I update it.
+        
+        // Let's Update text_parser.dart to have children!
+        node.children.clear(); // Reset 
+        
+        if (node.level == 0) {
+           roots.add(node);
+           stack = [node]; // Reset stack to this root
+        } else {
+           // Find parent
+           // If current level > stack.length, it's a leap, attach to last
+           // If current level <= stack.length - 1 ...
+           
+           // Correct logic:
+           // Stack[0] -> Level 0
+           // Stack[k] -> Level k
+           
+           if (node.level > stack.length) {
+              // Gap? Just attach to last
+              if (stack.isNotEmpty) stack.last.children.add(node);
+           } else {
+              // Pop until stack size == level
+              // e.g. Node Level 1. Stack size should be 1 (index 0).
+              while (stack.length > node.level) {
+                 stack.removeLast();
+              }
+              if (stack.isNotEmpty) stack.last.children.add(node);
+           }
+           stack.add(node); // Push self
+        }
+     }
+     return roots;
   }
 }

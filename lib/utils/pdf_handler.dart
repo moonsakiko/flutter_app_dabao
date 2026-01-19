@@ -34,10 +34,6 @@ class PdfHandler {
     return nodes;
   }
 
-  /// Writes bookmarks. 
-  /// Strategy:
-  /// 1. Try to write to `File(sourcePath).parent` (Adjacent save).
-  /// 2. If fails (FileSystemException), fallback to `Downloads/AppName`.
   static Future<String> writeBookmarks(String sourcePath, List<BookmarkNode> nodes) async {
     final file = File(sourcePath);
     if (!file.existsSync()) throw Exception("源文件丢失");
@@ -69,7 +65,6 @@ class PdfHandler {
       }
     }
     
-    // Construct Primary Path (Adjacent)
     String filename = Uri.file(sourcePath).pathSegments.last;
     String nameWithoutExt = filename.toLowerCase().endsWith('.pdf') 
         ? filename.substring(0, filename.length - 4) 
@@ -79,16 +74,8 @@ class PdfHandler {
     String finalPath = adjacentPath;
     
     try {
-      // Try writing adjacent
-      // Note: FilePicker cache paths are usually readable but usually NOT writable if they are content:// URI text
-      // But Flutter FilePicker usually caches to a temp dir which IS writable.
-      // However, user specifically wants it "Next to source".
-      // If source was picked via SAF (open document), we don't have write access to its parent usually on modern Android.
-      // But let's try.
       await File(adjacentPath).writeAsBytes(await document.save());
-      
     } catch (e) {
-      // Fallback Strategy: Download Directory
       final downloadDir = Directory('/storage/emulated/0/Download');
       if (downloadDir.existsSync()) {
         final appDir = Directory("${downloadDir.path}/${AppConfig.appName}");
@@ -96,10 +83,7 @@ class PdfHandler {
         finalPath = "${appDir.path}/${nameWithoutExt}_new.pdf";
         await File(finalPath).writeAsBytes(await document.save());
       } else {
-        // Last resort: Temp dir (user can't access easily but better than crash)
-        final temp = await getTemporaryDirectory();
-         finalPath = "${temp.path}/${nameWithoutExt}_new.pdf";
-         await File(finalPath).writeAsBytes(await document.save());
+         rethrow;
       }
     }
     
