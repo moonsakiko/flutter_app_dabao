@@ -33,12 +33,7 @@ jobs:
            echo "y" | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
            
       - name: Create Android Project (Scaffold)
-        run: |
-          if [ ! -d "android" ]; then
-             flutter create . --platforms android
-          fi
-          # We have our own android folder, so this shouldn't overwrite if it exists.
-          # But to be safe, we rely on the repository's android folder.
+        run: flutter create . --platforms android --org com.pdftool.pro
           
       - name: Get Dependencies
         run: flutter pub get
