@@ -144,7 +144,7 @@ class _AutoStitchScreenState extends State<AutoStitchScreen> {
         // 提示
         Card(
           margin: const EdgeInsets.all(16),
-          color: cs.surfaceContainerHighest,
+          color: cs.surfaceVariant,
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(children: [
@@ -197,7 +197,7 @@ class _AutoStitchScreenState extends State<AutoStitchScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: cs.surfaceContainerHighest,
+            color: cs.surfaceVariant,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(children: [

@@ -149,7 +149,7 @@ class _SmartCutScreenState extends State<SmartCutScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           // 提示
-          Card(color: cs.surfaceContainerHighest, child: const Padding(
+          Card(color: cs.surfaceVariant, child: const Padding(
             padding: EdgeInsets.all(12),
             child: Row(children: [
               Icon(Icons.lightbulb_outline, color: Colors.amber),
