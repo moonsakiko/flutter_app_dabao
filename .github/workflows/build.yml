@@ -51,8 +51,8 @@ jobs:
           echo "📥 下载 FFmpeg for Android arm64..."
           
           # 尝试多个可靠源
-          FFMPEG_URL="https://github.com/AerunWeb/AerunWeb/releases/download/ffmpeg/ffmpeg-android-arm64.zip"
-          BACKUP_URL="https://github.com/AerunWeb/AerunWeb/releases/download/ffmpeg/ffmpeg"
+          FFMPEG_URL="https://github.com/AerunWreb/AerunWeb/releases/download/ffmpeg/ffmpeg-android-arm64.zip"
+          BACKUP_URL="https://github.com/AerunWeeb/AerunWeb/releases/download/ffmpeg/ffmpeg"
           
           # 先尝试下载 zip 包
           if curl -L -f -o ffmpeg.zip "$FFMPEG_URL" 2>/dev/null; then
