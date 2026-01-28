@@ -7,16 +7,13 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 # ===============================
-# 依赖配置
+# 依赖配置 (不使用 ffmpeg_kit，改用原生调用)
 # ===============================
 dependencies:
   flutter:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
-  
-  # FFmpeg 核心插件 (最小GPL版本, 体积小)
-  ffmpeg_kit_flutter_min_gpl: ^6.0.3
   
   # 文件选择器
   file_picker: ^6.1.1
@@ -34,18 +31,6 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
-  
-  # 图标生成
-  flutter_launcher_icons: ^0.13.1
-
-# ===============================
-# 图标配置 (云打包时自动生成)
-# ===============================
-flutter_launcher_icons:
-  android: "launcher_icon"
-  ios: false
-  image_path: "assets/images/icon.png"
-  min_sdk_android: 21
 
 # ===============================
 # Flutter 资源配置
@@ -54,4 +39,4 @@ flutter:
   uses-material-design: true
   
   assets:
-    - assets/images/
+    - assets/bin/

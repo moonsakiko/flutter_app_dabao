@@ -14,7 +14,6 @@ class SmartCutScreen extends StatefulWidget {
 }
 
 class _SmartCutScreenState extends State<SmartCutScreen> {
-  final FFmpegService _ffmpeg = FFmpegService();
   
   String? _selectedPath;
   String? _videoName;
@@ -33,7 +32,6 @@ class _SmartCutScreenState extends State<SmartCutScreen> {
   @override
   void dispose() {
     _timeCtrl.dispose();
-    _ffmpeg.dispose();
     super.dispose();
   }
 
@@ -51,7 +49,7 @@ class _SmartCutScreenState extends State<SmartCutScreen> {
         });
 
         if (file.path != null) {
-          final meta = await _ffmpeg.analyzeVideo(file.path!);
+          final meta = await FFmpegService.analyzeVideo(file.path!);
           if (meta != null && mounted) {
             setState(() {
               _videoMeta = meta;
@@ -94,9 +92,9 @@ class _SmartCutScreenState extends State<SmartCutScreen> {
         
         setState(() { _progress = i / _segments.length * 0.8; _status = '剪切 ${i+1}/${_segments.length}...'; });
         
-        final ok = await _ffmpeg.cutVideo(
-          inputPath: _selectedPath!,
-          outputPath: outPath,
+        final ok = await FFmpegService.cutVideo(
+          input: _selectedPath!,
+          output: outPath,
           startSeconds: seg['start']!,
           endSeconds: seg['end']!,
         );
@@ -108,7 +106,7 @@ class _SmartCutScreenState extends State<SmartCutScreen> {
       if (_mergeMode && outputs.length > 1) {
         setState(() { _status = '合并中...'; _progress = 0.9; });
         finalOut = '${dir.path}/${base}_merged.$ext';
-        final ok = await _ffmpeg.stitchSameGroup(inputPaths: outputs, outputPath: finalOut);
+        final ok = await FFmpegService.stitchVideos(inputs: outputs, output: finalOut);
         if (!ok) throw Exception('合并失败');
         for (final f in outputs) { try { File(f).deleteSync(); } catch(_) {} }
       } else {

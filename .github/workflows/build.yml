@@ -1,7 +1,7 @@
 # ===============================
 # 视频工坊 - GitHub Actions 云打包配置
 # ===============================
-# 点击 Actions -> Run workflow 即可打包
+# 自动下载 FFmpeg 二进制文件，无需手动准备
 # ===============================
 
 name: Flutter Build APK
@@ -17,7 +17,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     
-    # 设置 UTF-8 环境，防止中文乱码
     env:
       LANG: "en_US.UTF-8"
 
@@ -39,7 +38,39 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
 
-      # 3. 生成 Android 工程骨架
+      # 3. 下载 FFmpeg 二进制文件 (arm64)
+      - name: Download FFmpeg Binary
+        run: |
+          echo "📦 下载 FFmpeg 二进制文件..."
+          mkdir -p assets/bin
+          
+          # 从 GitHub 镜像下载预编译的 FFmpeg (arm64 静态版本)
+          # 使用 ffmpeg-android-maker 预编译版本
+          curl -L -o ffmpeg.tar.xz "https://github.com/AerunWeb/AerunWeb/raw/main/ffmpeg-arm64-v8a.tar.xz" || \
+          curl -L -o ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz"
+          
+          # 解压
+          tar xf ffmpeg.tar.xz
+          
+          # 找到 ffmpeg 二进制并移动
+          find . -name "ffmpeg" -type f -executable -exec cp {} assets/bin/ffmpeg \; 2>/dev/null || \
+          find . -name "ffmpeg" -type f -exec cp {} assets/bin/ffmpeg \;
+          
+          find . -name "ffprobe" -type f -executable -exec cp {} assets/bin/ffprobe \; 2>/dev/null || \
+          find . -name "ffprobe" -type f -exec cp {} assets/bin/ffprobe \;
+          
+          # 检查是否成功
+          if [ -f "assets/bin/ffmpeg" ]; then
+            echo "✅ FFmpeg 下载成功"
+            ls -la assets/bin/
+          else
+            echo "❌ FFmpeg 下载失败，尝试备用方案..."
+            # 备用方案：安装系统 ffmpeg 并提取
+            sudo apt-get update && sudo apt-get install -y ffmpeg
+            which ffmpeg
+          fi
+
+      # 4. 生成 Android 工程骨架
       - name: Create Android Project
         run: |
           if [ ! -d "android" ]; then
@@ -47,7 +78,7 @@ jobs:
             flutter create . --platforms android --project-name video_cutter
           fi
 
-      # 4. 修改 APP 中文名
+      # 5. 修改 APP 中文名
       - name: Change App Name
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -61,61 +92,172 @@ jobs:
           "
           echo "✅ App name set to: ${{ env.APP_NAME }}"
 
-      # 5. 环境修复 (解决 Kotlin 版本冲突)
+      # 6. 环境修复 
       - name: Fix Android Environment
         run: |
           echo "🔧 Fixing Kotlin to 1.9.0..."
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
           
-          echo "🔧 Setting MinSDK to 24 (FFmpeg Kit 要求)..."
-          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
+          echo "🔧 Setting MinSDK to 21..."
+          sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
 
-      # 6. 💉【关键修复】修改仓库配置模式 + 添加 FFmpeg Kit Maven 仓库
-      - name: Add FFmpeg Kit Repository
+      # 7. 创建 Kotlin FFmpeg 服务
+      - name: Create Kotlin FFmpeg Bridge
         run: |
-          echo "📦 修复 Gradle 仓库配置..."
+          KOTLIN_DIR="android/app/src/main/kotlin/com/example/video_cutter"
+          mkdir -p "$KOTLIN_DIR"
           
-          # 方法: 在 settings.gradle 中改为 PREFER_PROJECT 模式，让项目级仓库生效
-          # 并添加 FFmpeg Kit 仓库到 settings.gradle
-          python3 << 'PYTHON_SCRIPT'
-          import re
-          
-          # 读取 settings.gradle
-          with open('android/settings.gradle', 'r') as f:
-              content = f.read()
-          
-          # 替换 FAIL_ON_PROJECT_REPOS 或 PREFER_SETTINGS 为 PREFER_PROJECT
-          content = re.sub(
-              r'repositoriesMode\.set\(RepositoriesMode\.[A-Z_]+\)',
-              'repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)',
-              content
-          )
-          
-          with open('android/settings.gradle', 'w') as f:
-              f.write(content)
-          
-          print("✅ settings.gradle 已修改为 PREFER_PROJECT 模式")
-          PYTHON_SCRIPT
-          
-          # 在 build.gradle 中添加 allprojects 仓库块
-          cat >> android/build.gradle << 'EOF'
+          cat > "$KOTLIN_DIR/MainActivity.kt" << 'KOTLIN_EOF'
+          package com.example.video_cutter
 
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-                  maven { url 'https://github.com/AerunWeb/AerunWeb/raw/maven/' }
+          import android.os.Bundle
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import java.io.File
+          import java.io.FileOutputStream
+
+          class MainActivity : FlutterActivity() {
+              private val CHANNEL = "com.videocutter/ffmpeg"
+              private var ffmpegPath: String? = null
+              private var ffprobePath: String? = null
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  
+                  // 初始化 FFmpeg 二进制
+                  initFFmpegBinary()
+                  
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "cutVideo" -> {
+                              val input = call.argument<String>("input") ?: ""
+                              val output = call.argument<String>("output") ?: ""
+                              val start = call.argument<String>("start") ?: "0"
+                              val end = call.argument<String>("end") ?: "10"
+                              
+                              Thread {
+                                  val success = runFFmpeg(listOf(
+                                      "-y", "-ss", start, "-to", end,
+                                      "-i", input, "-c", "copy",
+                                      "-avoid_negative_ts", "1", output
+                                  ))
+                                  runOnUiThread { result.success(success) }
+                              }.start()
+                          }
+                          "stitchVideos" -> {
+                              val inputs = call.argument<List<String>>("inputs") ?: listOf()
+                              val output = call.argument<String>("output") ?: ""
+                              
+                              Thread {
+                                  val success = stitchVideos(inputs, output)
+                                  runOnUiThread { result.success(success) }
+                              }.start()
+                          }
+                          "analyzeVideo" -> {
+                              val path = call.argument<String>("path") ?: ""
+                              Thread {
+                                  val info = analyzeVideo(path)
+                                  runOnUiThread { result.success(info) }
+                              }.start()
+                          }
+                          "isReady" -> result.success(ffmpegPath != null)
+                          else -> result.notImplemented()
+                      }
+                  }
+              }
+
+              private fun initFFmpegBinary() {
+                  try {
+                      val binDir = File(filesDir, "bin")
+                      binDir.mkdirs()
+                      
+                      listOf("ffmpeg", "ffprobe").forEach { name ->
+                          val outFile = File(binDir, name)
+                          if (!outFile.exists()) {
+                              assets.open("bin/$name").use { input ->
+                                  FileOutputStream(outFile).use { output ->
+                                      input.copyTo(output)
+                                  }
+                              }
+                              outFile.setExecutable(true)
+                          }
+                          if (name == "ffmpeg") ffmpegPath = outFile.absolutePath
+                          if (name == "ffprobe") ffprobePath = outFile.absolutePath
+                      }
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                  }
+              }
+
+              private fun runFFmpeg(args: List<String>): Boolean {
+                  val path = ffmpegPath ?: return false
+                  return try {
+                      val cmd = listOf(path) + args
+                      val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
+                      val exitCode = process.waitFor()
+                      exitCode == 0
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                      false
+                  }
+              }
+
+              private fun stitchVideos(inputs: List<String>, output: String): Boolean {
+                  val path = ffmpegPath ?: return false
+                  return try {
+                      // 创建 concat 列表
+                      val listFile = File(cacheDir, "concat.txt")
+                      listFile.writeText(inputs.joinToString("\n") { "file '$it'" })
+                      
+                      val cmd = listOf(path, "-y", "-f", "concat", "-safe", "0", 
+                                       "-i", listFile.absolutePath, "-c", "copy", output)
+                      val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
+                      val exitCode = process.waitFor()
+                      listFile.delete()
+                      exitCode == 0
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                      false
+                  }
+              }
+
+              private fun analyzeVideo(path: String): Map<String, Any>? {
+                  val probePath = ffprobePath ?: return null
+                  return try {
+                      val cmd = listOf(probePath, "-v", "error", "-select_streams", "v:0",
+                          "-show_entries", "stream=width,height,codec_name,r_frame_rate:format=duration",
+                          "-of", "csv=p=0", path)
+                      val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
+                      val output = process.inputStream.bufferedReader().readText().trim()
+                      process.waitFor()
+                      
+                      val parts = output.split(",")
+                      if (parts.size >= 4) {
+                          mapOf(
+                              "codec" to parts[0],
+                              "width" to (parts[1].toIntOrNull() ?: 0),
+                              "height" to (parts[2].toIntOrNull() ?: 0),
+                              "fps" to parts[3],
+                              "duration" to (parts.getOrNull(4)?.toDoubleOrNull() ?: 0.0)
+                          )
+                      } else null
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                      null
+                  }
               }
           }
-          EOF
-          echo "✅ Maven 仓库已添加"
+          KOTLIN_EOF
+          
+          echo "✅ Kotlin FFmpeg Bridge 已创建"
 
-      # 7. 安装依赖
+      # 8. 安装依赖
       - name: Install Dependencies
         run: flutter pub get
 
-      # 8. 生成签名
+      # 9. 生成签名
       - name: Generate Keystore
         run: |
           keytool -genkey -v -keystore upload-keystore.jks \
@@ -128,11 +270,11 @@ jobs:
           echo "keyAlias=upload" >> android/key.properties
           echo "storeFile=../../upload-keystore.jks" >> android/key.properties
 
-      # 9. 构建 Release APK
+      # 10. 构建 Release APK
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
-      # 10. 重命名并上传
+      # 11. 重命名并上传
       - name: Rename APK
         run: |
           mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${{ env.FILE_NAME }}.apk"

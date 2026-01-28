@@ -13,8 +13,6 @@ class AutoStitchScreen extends StatefulWidget {
 }
 
 class _AutoStitchScreenState extends State<AutoStitchScreen> {
-  final FFmpegService _ffmpeg = FFmpegService();
-  
   List<VideoMeta> _videos = [];
   bool _deleteSource = false;
   bool _isProcessing = false;
@@ -25,12 +23,6 @@ class _AutoStitchScreenState extends State<AutoStitchScreen> {
     Colors.green, Colors.blue, Colors.orange, Colors.purple, Colors.teal,
     Colors.pink, Colors.indigo, Colors.amber, Colors.cyan, Colors.lime,
   ];
-
-  @override
-  void dispose() {
-    _ffmpeg.dispose();
-    super.dispose();
-  }
 
   Future<void> _pickVideos() async {
     try {
@@ -45,7 +37,7 @@ class _AutoStitchScreenState extends State<AutoStitchScreen> {
         List<VideoMeta> analyzed = [];
         for (final file in result.files) {
           if (file.path == null) continue;
-          final meta = await _ffmpeg.analyzeVideo(file.path!);
+          final meta = await FFmpegService.analyzeVideo(file.path!);
           if (meta != null) analyzed.add(meta);
         }
 
@@ -91,20 +83,19 @@ class _AutoStitchScreenState extends State<AutoStitchScreen> {
       final dir = await getTemporaryDirectory();
       final outPath = '${dir.path}/stitch_${DateTime.now().millisecondsSinceEpoch}.mp4';
       
-      bool success;
-      if (_isSameGroup) {
-        setState(() { _status = '同组视频，无损拼接中...'; });
-        success = await _ffmpeg.stitchSameGroup(
-          inputPaths: _videos.map((v) => v.path).toList(),
-          outputPath: outPath,
-        );
-      } else {
-        setState(() { _status = '异组视频，智能转码中...'; });
-        success = await _ffmpeg.stitchDifferentGroup(
-          videos: _videos,
-          outputPath: outPath,
-        );
+      // 目前只支持同组无损拼接
+      if (!_isSameGroup) {
+        setState(() { _status = '⚠️ 异组视频暂不支持，请选择相同规格的视频'; });
+        _showError('异组视频暂不支持，请选择相同规格的视频');
+        setState(() { _isProcessing = false; });
+        return;
       }
+      
+      setState(() { _status = '同组视频，无损拼接中...'; });
+      final success = await FFmpegService.stitchVideos(
+        inputs: _videos.map((v) => v.path).toList(),
+        output: outPath,
+      );
 
       if (!success) throw Exception('拼接失败');
 
@@ -160,7 +151,7 @@ class _AutoStitchScreenState extends State<AutoStitchScreen> {
               const Icon(Icons.lightbulb_outline, color: Colors.amber),
               const SizedBox(width: 8),
               Expanded(child: Text(
-                '相同 [组] 的视频可无损秒拼\n不同 [组] 会自动智能转码',
+                '相同 [组] 的视频可无损秒拼\n请选择相同规格的视频',
                 style: TextStyle(fontSize: 13, color: Colors.grey[400]),
               )),
             ]),
@@ -191,7 +182,7 @@ class _AutoStitchScreenState extends State<AutoStitchScreen> {
                           child: Text(v.groupLabel!, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
                         ),
                         title: Text(v.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text('${v.resolution} | ${v.fps.round()}fps | ${v.fileSizeStr}', style: const TextStyle(fontSize: 12)),
+                        subtitle: Text('${v.resolution} | ${v.fps.round()}fps', style: const TextStyle(fontSize: 12)),
                         trailing: IconButton(
                           icon: const Icon(Icons.close),
                           onPressed: _isProcessing ? null : () => _removeVideo(index),
@@ -215,11 +206,11 @@ class _AutoStitchScreenState extends State<AutoStitchScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Row(children: [
-                  Icon(_isSameGroup ? Icons.flash_on : Icons.autorenew, 
+                  Icon(_isSameGroup ? Icons.flash_on : Icons.warning_amber, 
                       color: _isSameGroup ? Colors.green : Colors.orange, size: 20),
                   const SizedBox(width: 8),
                   Text(
-                    _isSameGroup ? '同组视频 - 无损极速拼接' : '异组视频 - 需要转码处理',
+                    _isSameGroup ? '同组视频 - 无损极速拼接' : '⚠️ 异组视频 - 请选择相同规格',
                     style: TextStyle(color: _isSameGroup ? Colors.green : Colors.orange),
                   ),
                 ]),
@@ -252,7 +243,7 @@ class _AutoStitchScreenState extends State<AutoStitchScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: _isProcessing || _videos.length < 2 ? null : _execute,
+                  onPressed: _isProcessing || _videos.length < 2 || !_isSameGroup ? null : _execute,
                   icon: _isProcessing 
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.merge),
