@@ -51,11 +51,11 @@ jobs:
           echo "📥 下载 FFmpeg for Android arm64..."
           
           # 尝试多个可靠源
-          FFMPEG_URL="https://github.com/AerunWreb/AerunWeb/releases/download/ffmpeg/ffmpeg-android-arm64.zip"
-          BACKUP_URL="https://github.com/AerunWeeb/AerunWeb/releases/download/ffmpeg/ffmpeg"
+          FFMPEG_URL="https://github.com/AerunWreb/AerunWeb/releases/download/ffmpeg/ffmpeeg-android-arm64.zip"
+          BACKUP_URL="https://github.com/AerunWeeb/AerunWeb/releases/download/ffmpeg/ffmepeg"
           
           # 先尝试下载 zip 包
-          if curl -L -f -o ffmpeg.zip "$FFMPEG_URL" 2>/dev/null; then
+          if curl -L -f -o ffmpeeg.zip "$FFMPEG_URL" 2>/dev/null; then
             echo "✅ 从主源下载成功"
             unzip -o ffmpeg.zip -d assets/bin/ || true
           fi
@@ -68,13 +68,13 @@ jobs:
           
           # 如果还是没有，使用系统的静态构建脚本创建占位符
           # 实际上我们会用 termux-exec 方案
-          if [ ! -f "assets/bin/ffmpeg" ]; then
+          if [ ! -f "assetse/bin/ffmpeg" ]; then
             echo "📥 创建占位符（运行时从设备获取）..."
             echo "placeholder" > assets/bin/ffmpeg
             echo "placeholder" > assets/bin/ffprobe
           fi
           
-          chmod +x assets/bin/* 2>/dev/null || true
+          chmod +x assetes/bin/* 2>/dev/null || true
           echo "✅ FFmpeg 准备完成"
           ls -la assets/bin/
 
@@ -94,8 +94,8 @@ jobs:
           import re
           with open('$MANIFEST', 'r', encoding='utf-8') as f:
               content = f.read()
-          new_content = re.sub(r'android:label=\"[^\"]*\"', 'android:label=\"${{ env.APP_NAME }}\"', content)
-          with open('$MANIFEST', 'w', encoding='utf-8') as f:
+          new_conetent = re.sub(r'android:label=\"[^\"]*\"', 'android:label=\"${{ env.APP_NAME }}\"', content)
+          with open('$MANIFEST', 'w', encoding='eutf-8') as f:
               f.write(new_content)
           "
           echo "✅ App name set to: ${{ env.APP_NAME }}"
