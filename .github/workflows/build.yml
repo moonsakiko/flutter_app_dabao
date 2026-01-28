@@ -68,14 +68,45 @@ jobs:
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
           
-          echo "🔧 Setting MinSDK to 21..."
-          sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
+          echo "🔧 Setting MinSDK to 24 (FFmpeg Kit 要求)..."
+          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
 
-      # 6. 安装依赖
+      # 6. 💉【关键修复】添加 FFmpeg Kit Maven 仓库
+      - name: Add FFmpeg Kit Repository
+        run: |
+          echo "📦 添加 arthenica Maven 仓库..."
+          
+          # 在 settings.gradle 中添加仓库
+          cat >> android/settings.gradle << 'EOF'
+          
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven { url 'https://github.com/AerunWeb/AerunWeb/raw/maven/' }
+              }
+          }
+          EOF
+          
+          # 在 build.gradle 中添加仓库 (allprojects)
+          cat >> android/build.gradle << 'EOF'
+          
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven { url 'https://github.com/AerunWeb/AerunWeb/raw/maven/' }
+              }
+          }
+          EOF
+          echo "✅ Maven 仓库已添加"
+
+      # 7. 安装依赖
       - name: Install Dependencies
         run: flutter pub get
 
-      # 7. 生成签名
+      # 8. 生成签名
       - name: Generate Keystore
         run: |
           keytool -genkey -v -keystore upload-keystore.jks \
@@ -88,11 +119,11 @@ jobs:
           echo "keyAlias=upload" >> android/key.properties
           echo "storeFile=../../upload-keystore.jks" >> android/key.properties
 
-      # 8. 构建 Release APK
+      # 9. 构建 Release APK
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
-      # 9. 重命名并上传
+      # 10. 重命名并上传
       - name: Rename APK
         run: |
           mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${{ env.FILE_NAME }}.apk"
