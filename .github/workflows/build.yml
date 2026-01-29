@@ -78,18 +78,29 @@ jobs:
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
           
+          # 添加 arthenica Maven 仓库 (ffmpeg-kit 需要)
+          # 在 allprojects { repositories { ... } } 中添加
+          if ! grep -q "arthenica" android/build.gradle; then
+            sed -i '/mavenCentral()/a\        maven { url "https://packages.arthenica.com/maven" }' android/build.gradle
+          fi
+          
+          # 同时在 settings.gradle 的 pluginManagement 和 dependencyResolutionManagement 中添加
+          if ! grep -q "arthenica" android/settings.gradle; then
+            sed -i '/mavenCentral()/a\        maven { url "https://packages.arthenica.com/maven" }' android/settings.gradle
+          fi
+          
           # 修复 minSdkVersion (ffmpeg_kit 需要 24+)
-          # 使用更精确的替换，避免破坏 flutter.xxx 变量引用
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/g' android/app/build.gradle
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/g' android/app/build.gradle
-          
-          # 如果是旧格式，也处理
           sed -i 's/minSdkVersion 21/minSdkVersion 24/g' android/app/build.gradle
           sed -i 's/minSdkVersion 16/minSdkVersion 24/g' android/app/build.gradle
           
           echo "✅ Android 环境已修复"
-          echo "--- build.gradle 内容 ---"
-          cat android/app/build.gradle | head -50
+          echo "--- android/build.gradle ---"
+          cat android/build.gradle
+          echo ""
+          echo "--- android/settings.gradle ---"
+          cat android/settings.gradle | head -40
 
       - name: Install Dependencies
         run: flutter pub get
