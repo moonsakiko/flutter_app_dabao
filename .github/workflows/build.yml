@@ -84,6 +84,9 @@ jobs:
           
           echo "✅ Gradle Repositories 配置完成"
 
+      - name: Clean Build Environment
+        run: flutter clean
+
       - name: Install Dependencies
         run: flutter pub get
 
