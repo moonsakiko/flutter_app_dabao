@@ -61,15 +61,25 @@ class FFmpegService {
     required double endSeconds,
   }) async {
     try {
-      return await _channel.invokeMethod('cutVideo', {
+      final result = await _channel.invokeMethod('cutVideo', {
         'input': input,
         'output': output,
         'start': TimeParser.formatForFFmpeg(startSeconds),
         'end': TimeParser.formatForFFmpeg(endSeconds),
-      }) == true;
+      });
+      
+      if (result == true) return true;
+      // 如果返回字符串，说明是错误信息
+      if (result is String) throw Exception(result);
+      
+      return false;
     } catch (e) {
       print('❌ cutVideo error: $e');
-      return false;
+      // 抛出异常以便 UI 显示
+      if (e is PlatformException) {
+         throw Exception(e.message ?? e.toString());
+      }
+      throw Exception(e.toString());
     }
   }
 
@@ -79,13 +89,20 @@ class FFmpegService {
     required String output,
   }) async {
     try {
-      return await _channel.invokeMethod('stitchVideos', {
+      final result = await _channel.invokeMethod('stitchVideos', {
         'inputs': inputs,
         'output': output,
-      }) == true;
+      });
+      
+      if (result == true) return true;
+      if (result is String) throw Exception(result);
+      return false;
     } catch (e) {
       print('❌ stitchVideos error: $e');
-      return false;
+      if (e is PlatformException) {
+         throw Exception(e.message ?? e.toString());
+      }
+      throw Exception(e.toString());
     }
   }
 }

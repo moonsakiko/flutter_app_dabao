@@ -68,6 +68,157 @@ jobs:
              exit 1
           fi
 
+      - name: Create Kotlin FFmpeg Bridge
+        run: |
+          mkdir -p android/app/src/main/kotlin/com/videocutter
+          cat << 'EOF' > android/app/src/main/kotlin/com/videocutter/MainActivity.kt
+          package com.videocutter
+
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import java.io.File
+          import java.io.FileOutputStream
+          import android.util.Log
+          import org.json.JSONObject
+
+          class MainActivity: FlutterActivity() {
+              private val CHANNEL = "com.videocutter/ffmpeg"
+              private val TAG = "FFmpegBridge"
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "isReady" -> {
+                              val file = File(filesDir, "bin/ffmpeg")
+                              if (!file.exists() || !file.canExecute()) {
+                                  copyAssets()
+                              }
+                              result.success(file.exists())
+                          }
+                          "cutVideo" -> {
+                              Thread {
+                                  try {
+                                      val input = call.argument<String>("input")!!
+                                      val output = call.argument<String>("output")!!
+                                      val start = call.argument<String>("start")!!
+                                      val end = call.argument<String>("end")!!
+                                      // 使用 copy 模式，注意 ss/to 的位置
+                                      // -ss before -i is faster but might be inaccurate for copy. after -i is slower.
+                                      // For cut, usually: ffmpeg -ss start -to end -i input -c copy ...
+                                      // But safe approach: -ss start -i input -to duration ...
+                                      // using the provided args directly
+                                      val cmd = listOf(getFFmpegPath(), "-y", "-ss", start, "-to", end, "-i", input, "-c", "copy", "-avoid_negative_ts", "1", output)
+                                      runFFmpeg(cmd, result)
+                                  } catch (e: Exception) {
+                                      runOnUiThread { result.success("Exception: ${e.message}") }
+                                  }
+                              }.start()
+                          }
+                          "stitchVideos" -> {
+                              Thread {
+                                  try {
+                                      val inputs = call.argument<List<String>>("inputs")!!
+                                      val output = call.argument<String>("output")!!
+                                      val listFile = File(cacheDir, "list.txt")
+                                      listFile.writeText(inputs.joinToString("\n") { "file '$it'" })
+                                      val cmd = listOf(getFFmpegPath(), "-y", "-f", "concat", "-safe", "0", "-i", listFile.absolutePath, "-c", "copy", output)
+                                      runFFmpeg(cmd, result)
+                                  } catch (e: Exception) {
+                                      runOnUiThread { result.success("Exception: ${e.message}") }
+                                  }
+                              }.start()
+                          }
+                          "analyzeVideo" -> {
+                              Thread {
+                                  try {
+                                      val path = call.argument<String>("path")!!
+                                      val cmd = listOf(getFFprobePath(), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,r_frame_rate,codec_name,duration", "-of", "json", path)
+                                      val process = ProcessBuilder(cmd).start()
+                                      val output = process.inputStream.bufferedReader().readText()
+                                      process.waitFor()
+                                      
+                                      if (output.isNotEmpty()) {
+                                          try {
+                                              val json = JSONObject(output)
+                                              val streams = json.optJSONArray("streams")
+                                              if (streams != null && streams.length() > 0) {
+                                                  val stream = streams.getJSONObject(0)
+                                                  val map = HashMap<String, Any>()
+                                                  map["width"] = stream.optInt("width")
+                                                  map["height"] = stream.optInt("height")
+                                                  map["codec"] = stream.optString("codec_name")
+                                                  map["fps"] = stream.optString("r_frame_rate")
+                                                  map["duration"] = stream.optDouble("duration", 0.0)
+                                                  runOnUiThread { result.success(map) }
+                                                  return@Thread
+                                              }
+                                          } catch (e: Exception) {
+                                              Log.e(TAG, "Parse Json failed", e)
+                                          }
+                                      }
+                                      runOnUiThread { result.success(null) }
+                                  } catch (e: Exception) {
+                                      runOnUiThread { result.success(null) }
+                                  }
+                              }.start()
+                          }
+                          else -> result.notImplemented()
+                      }
+                  }
+              }
+
+              private fun getFFmpegPath() = File(filesDir, "bin/ffmpeg").absolutePath
+              private fun getFFprobePath() = File(filesDir, "bin/ffprobe").absolutePath
+
+              private fun copyAssets() {
+                  try {
+                      val binDir = File(filesDir, "bin")
+                      if (!binDir.exists()) binDir.mkdirs()
+                      
+                      val assets = arrayOf("ffmpeg", "ffprobe")
+                      for (name in assets) {
+                          val userBin = File(binDir, name)
+                          if (!userBin.exists() || userBin.length() < 1000) {
+                              assets.open("bin/$name").use { input ->
+                                  FileOutputStream(userBin).use { output ->
+                                      input.copyTo(output)
+                                  }
+                              }
+                              userBin.setExecutable(true, false)
+                          }
+                      }
+                  } catch (e: Exception) {
+                      Log.e(TAG, "Copy assets failed", e)
+                  }
+              }
+
+              private fun runFFmpeg(cmd: List<String>, result: MethodChannel.Result) {
+                  try {
+                      val process = ProcessBuilder(cmd)
+                          .redirectErrorStream(true)
+                          .start()
+                      
+                      val output = process.inputStream.bufferedReader().readText()
+                      val exitCode = process.waitFor()
+                      
+                      runOnUiThread {
+                          if (exitCode == 0) {
+                              result.success(true)
+                          } else {
+                              val log = "ExitCode: $exitCode\nCmd: $cmd\nOutput:\n$output"
+                              Log.e(TAG, log)
+                              result.success(log)
+                          }
+                      }
+                  } catch (e: Exception) {
+                      runOnUiThread { result.success("Process Exception: ${e.message}") }
+                  }
+              }
+          }
+          EOF
+
       - name: Create Android Project
         run: |
           if [ ! -d "android" ]; then
