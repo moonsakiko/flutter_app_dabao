@@ -50,7 +50,6 @@ jobs:
           sed -i 's/android:label="[^"]*"/android:label="视频工坊"/g' "$MANIFEST"
           
           # 添加必要的存储和文件访问权限
-          # 注意：requestLegacyExternalStorage 对于 Android 10 兼容性很重要
           if ! grep -q "READ_EXTERNAL_STORAGE" "$MANIFEST"; then
             sed -i 's/<application/<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"\/>\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"\/>\n\n    <application/g' "$MANIFEST"
           fi
@@ -61,18 +60,38 @@ jobs:
           
           echo "✅ AndroidManifest.xml 已更新"
 
-      - name: Configure Gradle (MinSDK & Kotlin)
+      - name: Configure Gradle (MinSDK & Kotlin & Repos)
         run: |
-          # 修复 Kotlin 版本 (兼容 Flutter 3.19)
+          # 修复 Kotlin 版本
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
           
           # 升级 MinSDK 到 24 (FFmpegKit 建议版本)
-          # 注意：FFmpegKit 虽然支持更低版本，但 24+ 最稳定且无需特殊处理
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/g' android/app/build.gradle
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/g' android/app/build.gradle
           
-          echo "✅ Android 环境配置已更新 (MinSDK -> 24)"
+          # 🟢 关键修复：确保 Maven Central 存在 (解决依赖下载失败问题)
+          echo "🔧 Injecting Maven Central..."
+          
+          # 1. 修复 settings.gradle (PluginManagement & DependencyResolution)
+          # 对于新版 Flutter，repositories 定义在 settings.gradle
+          if grep -q "repositories {" android/settings.gradle; then
+             # 使用简单的文本替换注入 mavenCentral()
+             sed -i 's/google()/google()\n        mavenCentral()/g' android/settings.gradle
+          fi
+          
+          # 2. 修复 build.gradle (Project Level)
+          # 旧版或某些插件可能依赖这里的 allprojects
+          if grep -q "allprojects" android/build.gradle; then
+              sed -i 's/google()/google()\n        mavenCentral()/g' android/build.gradle
+          fi
+          
+          # 3. 强制在 build.gradle 中添加 buildscript 仓库 (如果缺少)
+          if grep -q "buildscript" android/build.gradle; then
+              sed -i 's/google()/google()\n        mavenCentral()/g' android/build.gradle
+          fi
+          
+          echo "✅ Gradle 配置已修复 (MavenCentral Injected)"
 
       - name: Install Dependencies
         run: flutter pub get
@@ -90,14 +109,13 @@ jobs:
           echo "storeFile=../../upload-keystore.jks" >> android/key.properties
 
       - name: Build APK
-        # 使用 Fat APK (包含 armeabi-v7a 和 arm64-v8a) 确保兼容所有设备
         run: flutter build apk --release
 
       - name: Check APK Size
         run: |
           SIZE=$(stat -c%s build/app/outputs/flutter-apk/app-release.apk)
           echo "APK size: $SIZE bytes ($(($SIZE / 1024 / 1024)) MB)"
-          # FFmpegKit 包体积较大 (~30-50MB)，如果太小说明库没打进去
+          # FFmpegKit 包体积较大 (~30-50MB)
           if [ "$SIZE" -lt 20000000 ]; then
             echo "⚠️ APK 过小，依赖可能未正确打包"
             exit 1
