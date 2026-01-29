@@ -1,6 +1,6 @@
 # ===============================
 # 视频工坊 - GitHub Actions 云打包配置
-# 使用原生 FFmpeg 二进制 + Kotlin MethodChannel
+# 使用 JNI Libs 伪装策略绕过 Android 10+ 执行限制
 # ===============================
 
 name: Flutter Build APK
@@ -61,8 +61,6 @@ jobs:
           
           if [ "$SIZE" -gt 10000000 ]; then
              echo "✅ FFmpeg 下载成功"
-             chmod +x assets/bin/*
-             ls -lh assets/bin/
           else
              echo "❌ FFmpeg 下载失败或文件过小！停止构建。"
              exit 1
@@ -76,25 +74,31 @@ jobs:
 
       - name: Change App Name and Permissions
         run: |
-          # 📦 Move FFmpeg binaries to Native Assets (so they are at root of assets in APK)
-          mkdir -p android/app/src/main/assets/bin
-          cp -f assets/bin/ffmpeg android/app/src/main/assets/bin/
-          cp -f assets/bin/ffprobe android/app/src/main/assets/bin/
-          echo "✅ FFmpeg moved to android/app/src/main/assets/bin"
+          # 📦 关键策略：将 FFmpeg 伪装成 Shared Library (.so) 放入 jniLibs
+          # 这样 Android 安装时会自动将其解压到具有执行权限的 nativeLibraryDir
+          
+          JNI_DIR="android/app/src/main/jniLibs/arm64-v8a"
+          mkdir -p "$JNI_DIR"
+          
+          cp -f assets/bin/ffmpeg "$JNI_DIR/libffmpeg.so"
+          cp -f assets/bin/ffprobe "$JNI_DIR/libffprobe.so"
+          
+          echo "✅ FFmpeg moved to $JNI_DIR (Reinforced Execution Permission)"
 
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           
           # 修改 APP 名称
           sed -i 's/android:label="[^"]*"/android:label="视频工坊"/g' "$MANIFEST"
           
+          # 核心权限配置：extractNativeLibs=true (确保解压so), requestLegacyExternalStorage=true (文件访问)
+          # 我们替换 <application 标签
+          if ! grep -q "extractNativeLibs" "$MANIFEST"; then
+             sed -i 's/<application/<application android:extractNativeLibs="true" android:requestLegacyExternalStorage="true"/g' "$MANIFEST"
+          fi
+          
           # 添加存储权限
           if ! grep -q "READ_EXTERNAL_STORAGE" "$MANIFEST"; then
             sed -i 's/<application/<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"\/>\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"\/>\n\n    <application/g' "$MANIFEST"
-          fi
-          
-          # 添加 requestLegacyExternalStorage
-          if ! grep -q "requestLegacyExternalStorage" "$MANIFEST"; then
-            sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/g' "$MANIFEST"
           fi
           
           echo "✅ AndroidManifest.xml 已更新"
@@ -118,7 +122,7 @@ jobs:
           KOTLIN_DIR="android/app/src/main/kotlin/com/example/video_cutter"
           mkdir -p "$KOTLIN_DIR"
           
-          # Overwrite MainActivity.kt with Native FFmpeg Bridge (Verbose Debug Version)
+          # Overwrite MainActivity.kt with Native Lib Solution
           cat > "$KOTLIN_DIR/MainActivity.kt" << 'EOF'
           package com.example.video_cutter
 
@@ -133,20 +137,20 @@ jobs:
           class MainActivity: FlutterActivity() {
               private val CHANNEL = "com.videocutter/ffmpeg"
               private val TAG = "FFmpegBridge"
-              private var copyError: String = "Not initialized"
+              private var statusInfo: String = "Initializing..."
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
                       when (call.method) {
                           "isReady" -> {
-                              checkAndPrepareFFmpeg()
-                              result.success(File(getFFmpegPath()).exists())
+                              val ready = checkFFmpeg()
+                              result.success(ready)
                           }
                           "cutVideo" -> {
                               Thread {
-                                  if (!checkAndPrepareFFmpeg()) {
-                                      runOnUiThread { result.success("FFmpeg Error: $copyError") }
+                                  if (!checkFFmpeg()) {
+                                      runOnUiThread { result.success("FFmpeg Error: Binaries not found in $statusInfo") }
                                       return@Thread
                                   }
                                   try {
@@ -163,8 +167,8 @@ jobs:
                           }
                           "stitchVideos" -> {
                               Thread {
-                                  if (!checkAndPrepareFFmpeg()) {
-                                      runOnUiThread { result.success("FFmpeg Error: $copyError") }
+                                  if (!checkFFmpeg()) {
+                                      runOnUiThread { result.success("FFmpeg Error: Binaries not found in $statusInfo") }
                                       return@Thread
                                   }
                                   try {
@@ -181,7 +185,7 @@ jobs:
                           }
                           "analyzeVideo" -> {
                               Thread {
-                                  if (!checkAndPrepareFFmpeg()) {
+                                  if (!checkFFmpeg()) {
                                       runOnUiThread { result.success(null) }
                                       return@Thread
                                   }
@@ -222,51 +226,22 @@ jobs:
                   }
               }
 
-              private fun getFFmpegPath() = File(filesDir, "bin/ffmpeg").absolutePath
-              private fun getFFprobePath() = File(filesDir, "bin/ffprobe").absolutePath
+              // Use Native Library Path (Executable on Android 10+)
+              private fun getFFmpegPath() = File(applicationInfo.nativeLibraryDir, "libffmpeg.so").absolutePath
+              private fun getFFprobePath() = File(applicationInfo.nativeLibraryDir, "libffprobe.so").absolutePath
 
-              @Synchronized
-              private fun checkAndPrepareFFmpeg(): Boolean {
-                  val binDir = File(filesDir, "bin")
-                  val ffmpeg = File(binDir, "ffmpeg")
-                  if (ffmpeg.exists() && ffmpeg.canExecute() && ffmpeg.length() > 1000) return true
-                  return copyAssets()
-              }
-
-              private fun copyAssets(): Boolean {
+              private fun checkFFmpeg(): Boolean {
+                  val ffmpeg = File(getFFmpegPath())
+                  if (ffmpeg.exists()) return true
+                  
+                  // Debug Info
                   try {
-                      val binDir = File(filesDir, "bin")
-                      if (!binDir.exists()) binDir.mkdirs()
-                      
-                      val assetNames = arrayOf("ffmpeg", "ffprobe")
-                      
-                      // Debug Scan
-                      val rootList = assets.list("")?.joinToString(",") ?: "null"
-                      val binList = assets.list("bin")?.joinToString(",") ?: "null"
-                      Log.d(TAG, "Assets Dump: Root=[$rootList], Bin=[$binList]")
-                      copyError = "Scan: Root=[$rootList], Bin=[$binList]"
-
-                      for (name in assetNames) {
-                          val userBin = File(binDir, name)
-                          if (!userBin.exists() || userBin.length() < 1000) {
-                              try {
-                                  assets.open("bin/$name").use { input ->
-                                      FileOutputStream(userBin).use { output ->
-                                          input.copyTo(output)
-                                      }
-                                  }
-                                  userBin.setExecutable(true, false)
-                              } catch(e: Exception) {
-                                  copyError += " | Copy $name Err: $e"
-                                  return false
-                              }
-                          }
-                      }
-                      return true
-                  } catch (e: Exception) {
-                      copyError += " | Fatal: $e"
-                      return false
+                      val dir = File(applicationInfo.nativeLibraryDir)
+                      statusInfo = "${dir.absolutePath} content: " + (dir.list()?.joinToString(",") ?: "null")
+                  } catch(e: Exception) {
+                      statusInfo = "Check Error: $e"
                   }
+                  return false
               }
 
               private fun runFFmpeg(cmd: List<String>, result: MethodChannel.Result) {
@@ -282,19 +257,19 @@ jobs:
                           if (exitCode == 0) {
                               result.success(true)
                           } else {
-                              val log = "ExitCode: $exitCode\nCmd: $cmd\nOutput:\n$output\nDebug: $copyError"
+                              val log = "ExitCode: $exitCode\nCmd: $cmd\nFail Reason: Executable?\nOutput:\n$output\nDebug: $statusInfo"
                               Log.e(TAG, log)
                               result.success(log)
                           }
                       }
                   } catch (e: Exception) {
-                      runOnUiThread { result.success("Process Exception: ${e.message}\nDebug: $copyError") }
+                      runOnUiThread { result.success("Process Exception: ${e.message}\nDebug: $statusInfo") }
                   }
               }
           }
           EOF
           
-          echo "✅ Kotlin FFmpeg Bridge 已创建"
+          echo "✅ Kotlin FFmpeg Bridge (JNI Mode) 已创建"
 
       - name: Install Dependencies
         run: flutter pub get
