@@ -36,29 +36,62 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
 
-      # 下载 FFmpeg for Android (使用 Khang-NT 预编译二进制，稳定可靠)
+      # 下载 FFmpeg for Android (多源自动重试)
       - name: Download FFmpeg Binary
         run: |
-          echo "📦 下载 FFmpeg for Android arm64 (Khang-NT v4.4)..."
+          echo "📦 下载 FFmpeg for Android arm64..."
           mkdir -p assets/bin
           
-          # 下载 ffmpeg
-          curl -L -f -o assets/bin/ffmpeg "https://github.com/Khang-NT/ffmpeg-binary-android/releases/download/v4.4/ffmpeg-arm64-v8a"
+          download_ffmpeg() {
+             URL="$1"
+             echo "Trying FFmpeg from: $URL"
+             if curl -L -f -o assets/bin/ffmpeg --connect-timeout 10 --max-time 60 "$URL"; then
+                if [ $(stat -c%s "assets/bin/ffmpeg") -gt 1000000 ]; then
+                   echo "✅ FFmpeg download success!"
+                   return 0
+                fi
+             fi
+             echo "❌ Failed from this source."
+             return 1
+          }
           
-          # 下载 ffprobe
-          curl -L -f -o assets/bin/ffprobe "https://github.com/Khang-NT/ffmpeg-binary-android/releases/download/v4.4/ffprobe-arm64-v8a"
-          
-          # 检查下载结果 (文件应 > 10MB)
+          download_ffprobe() {
+             URL="$1"
+             echo "Trying FFprobe from: $URL"
+             if curl -L -f -o assets/bin/ffprobe --connect-timeout 10 --max-time 60 "$URL"; then
+                if [ $(stat -c%s "assets/bin/ffprobe") -gt 1000000 ]; then
+                   echo "✅ FFprobe download success!"
+                   return 0
+                fi
+             fi
+             echo "❌ Failed from this source."
+             return 1
+          }
+
+          # 1. 尝试 Khang-NT v4.3.2 (稳定)
+          download_ffmpeg "https://github.com/Khang-NT/ffmpeg-binary-android/releases/download/v4.3.2/ffmpeg-arm64-v8a" || \
+          # 2. 尝试 Khang-NT v4.5.1 (备用)
+          download_ffmpeg "https://github.com/Khang-NT/ffmpeg-binary-android/releases/download/0.4.5_1/ffmpeg-arm64-v8a" || \
+          # 3. 尝试 Khang-NT v4.4 (备用)
+          download_ffmpeg "https://github.com/Khang-NT/ffmpeg-binary-android/releases/download/v4.4/ffmpeg-arm64-v8a" || \
+          echo "⚠️ All FFmpeg sources failed!"
+
+          # 1. 尝试 Khang-NT v4.3.2 (稳定)
+          download_ffprobe "https://github.com/Khang-NT/ffmpeg-binary-android/releases/download/v4.3.2/ffprobe-arm64-v8a" || \
+          # 2. 尝试 Khang-NT v4.5.1
+          download_ffprobe "https://github.com/Khang-NT/ffmpeg-binary-android/releases/download/0.4.5_1/ffprobe-arm64-v8a" || \
+          # 3. 尝试 Khang-NT v4.4
+          download_ffprobe "https://github.com/Khang-NT/ffmpeg-binary-android/releases/download/v4.4/ffprobe-arm64-v8a" || \
+          echo "⚠️ All FFprobe sources failed!"
+
+          # 最终检查
           SIZE=$(stat -c%s "assets/bin/ffmpeg" 2>/dev/null || echo 0)
-          echo "Checked FFmpeg size: $SIZE bytes"
-          
           if [ "$SIZE" -gt 10000000 ]; then
-             echo "✅ FFmpeg 下载成功"
+             echo "🎉 FFmpeg 准备就绪"
              chmod +x assets/bin/*
              ls -lh assets/bin/
           else
-             echo "❌ FFmpeg 下载失败或文件过小！停止构建。"
-             # 打印最后几行 curl 错误日志 (如果有)
+             echo "⛔ 严重错误：无法下载有效的 FFmpeg 二进制文件，构建停止。"
              exit 1
           fi
 
