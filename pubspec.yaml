@@ -7,13 +7,16 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 # ===============================
-# 依赖配置 (不使用 ffmpeg_kit，改用原生调用)
+# 依赖配置
 # ===============================
 dependencies:
   flutter:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
+  
+  # FFmpeg 插件 (min-gpl 版本，约 15MB)
+  ffmpeg_kit_flutter_min_gpl: ^6.0.3
   
   # 文件选择器
   file_picker: ^6.1.1

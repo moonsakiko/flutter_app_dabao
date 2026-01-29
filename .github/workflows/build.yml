@@ -35,120 +35,17 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
 
-      # 【关键】下载 FFmpeg for Android (使用可靠的 arthenica/ffmpeg-kit 仓库)
-      - name: Download FFmpeg Binary
+      # 【关键】使用 ffmpeg_kit_flutter 插件（最可靠方案）
+      # 不再尝试下载独立二进制，直接使用 Flutter 插件
+      - name: Prepare FFmpeg (Plugin Mode)
         run: |
-          echo "📦 下载 FFmpeg for Android arm64..."
+          echo "� 使用 ffmpeg_kit_flutter 插件方案..."
           mkdir -p assets/bin
           
-          # ========================================
-          # 方案1: 直接从 mobile-ffmpeg LTS 下载 (最可靠)
-          # ========================================
-          echo "📥 尝试方案1: mobile-ffmpeg LTS..."
-          FFMPEG_LTS_URL="https://github.com/tanersener/mobile-ffmpeg/releases/download/v4.4.LTS/mobile-ffmpeg-min-gpl-4.4.LTS-android-main.aar"
+          # 创建占位符文件（实际 FFmpeg 由插件提供）
+          echo "# FFmpeg will be provided by ffmpeg_kit_flutter plugin" > assets/bin/README.txt
           
-<<<<<<< HEAD
-          # 下载 AAR 包并提取 arm64 二进制
-          curl -L -o mobile-ffmpeg.aar "$FFMPEG_LTS_URL" && {
-            unzip -o mobile-ffmpeg.aar -d ffmpeg_extract 2>/dev/null || true
-            
-            # 在 AAR 中查找 arm64 二进制
-            find ffmpeg_extract -name "libffmpegkit.so" -path "*arm64*" | head -1 | xargs -I {} dirname {} > .lib_path
-            LIB_PATH=$(cat .lib_path 2>/dev/null)
-            
-            if [ -n "$LIB_PATH" ] && [ -d "$LIB_PATH" ]; then
-              echo "✅ 找到库路径: $LIB_PATH"
-              ls -la "$LIB_PATH"
-            fi
-          }
-          
-          # ========================================
-          # 方案2: 使用 BtbN/FFmpeg-Builds 静态构建
-          # ========================================
-          if [ ! -f "assets/bin/ffmpeg" ] || [ $(stat -c%s "assets/bin/ffmpeg" 2>/dev/null || echo 0) -lt 1000000 ]; then
-            echo "📥 尝试方案2: BtbN FFmpeg 静态构建..."
-            
-            BTBN_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
-            curl -L -o ffmpeg-build.tar.xz "$BTBN_URL" && {
-              tar xf ffmpeg-build.tar.xz
-              find . -path "*/bin/ffmpeg" -type f | head -1 | xargs -I {} cp {} assets/bin/ffmpeg
-              find . -path "*/bin/ffprobe" -type f | head -1 | xargs -I {} cp {} assets/bin/ffprobe
-            }
-=======
-          # 尝试多个可靠源
-          FFMPEG_URL="https://github.com/AerunWreb/AerunWeb/releases/download/ffmpeg/ffmpeeg-android-arm64.zip"
-          BACKUP_URL="https://github.com/AerunWeeb/AerunWeb/releases/download/ffmpeg/ffmepeg"
-          
-          # 先尝试下载 zip 包
-          if curl -L -f -o ffmpeeg.zip "$FFMPEG_URL" 2>/dev/null; then
-            echo "✅ 从主源下载成功"
-            unzip -o ffmpeg.zip -d assets/bin/ || true
->>>>>>> 031b8d8de44a9e35a3fe4f26da4ec75ccbdfff44
-          fi
-          
-          # ========================================
-          # 方案3: 使用预编译的 Android 独立二进制
-          # ========================================
-          if [ ! -f "assets/bin/ffmpeg" ] || [ $(stat -c%s "assets/bin/ffmpeg" 2>/dev/null || echo 0) -lt 1000000 ]; then
-            echo "📥 尝试方案3: FFmpeg Android 独立二进制..."
-            
-            # 从 ApeironThan);预编译的 Android 静态二进制
-            ANDROID_FFMPEG_URL="https://github.com/ApeironThanatos/ffmpeg-android-build/releases/download/n7.1/ffmpeg-android-arm64-v8a.zip"
-            curl -L -o ffmpeg-android.zip "$ANDROID_FFMPEG_URL" && {
-              unzip -o ffmpeg-android.zip -d ffmpeg_android_extract
-              find ffmpeg_android_extract -name "ffmpeg" -type f | head -1 | xargs -I {} cp {} assets/bin/ffmpeg
-              find ffmpeg_android_extract -name "ffprobe" -type f | head -1 | xargs -I {} cp {} assets/bin/ffprobe
-            }
-          fi
-          
-<<<<<<< HEAD
-          # ========================================
-          # 方案4: 最后备选 - 从 eugeneware 下载
-          # ========================================
-          if [ ! -f "assets/bin/ffmpeg" ] || [ $(stat -c%s "assets/bin/ffmpeg" 2>/dev/null || echo 0) -lt 1000000 ]; then
-            echo "📥 尝试方案4: eugeneware 备选源..."
-            
-            EUGENE_URL="https://github.com/AerunWeb/ffmpeg-android-release/raw/main/ffmpeg-arm64-v8a"
-            curl -L -o assets/bin/ffmpeg "$EUGENE_URL" 2>/dev/null || true
-          fi
-          
-          # ========================================
-          # 设置权限并验证
-          # ========================================
-          chmod +x assets/bin/* 2>/dev/null || true
-          
-          echo ""
-          echo "========================================="
-          echo "✅ FFmpeg 下载结果:"
-          ls -lh assets/bin/ || echo "❌ assets/bin 目录不存在"
-          echo "========================================="
-          
-          # 最终检查
-          if [ -f "assets/bin/ffmpeg" ]; then
-            SIZE=$(stat -c%s "assets/bin/ffmpeg" 2>/dev/null || echo 0)
-            echo "FFmpeg 文件大小: $SIZE bytes ($(($SIZE / 1024 / 1024)) MB)"
-            if [ "$SIZE" -lt 1000000 ]; then
-              echo "⚠️ 警告: FFmpeg 文件过小，可能下载失败！"
-              echo "将使用 ffmpeg_kit_flutter 插件作为备选..."
-            else
-              echo "✅ FFmpeg 下载成功！"
-            fi
-          else
-            echo "❌ 所有下载源均失败，将使用 ffmpeg_kit_flutter 插件"
-          fi
-=======
-          # 如果还是没有，使用系统的静态构建脚本创建占位符
-          # 实际上我们会用 termux-exec 方案
-          if [ ! -f "assetse/bin/ffmpeg" ]; then
-            echo "📥 创建占位符（运行时从设备获取）..."
-            echo "placeholder" > assets/bin/ffmpeg
-            echo "placeholder" > assets/bin/ffprobe
-          fi
-          
-          chmod +x assetes/bin/* 2>/dev/null || true
-          echo "✅ FFmpeg 准备完成"
-          ls -la assets/bin/
->>>>>>> 031b8d8de44a9e35a3fe4f26da4ec75ccbdfff44
+          echo "✅ FFmpeg 准备完成 (使用插件模式)"
 
       - name: Create Android Project
         run: |
@@ -156,10 +53,9 @@ jobs:
             flutter create . --platforms android --project-name video_cutter
           fi
 
-      - name: Change App Name
+      - name: Change App Name and Permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-<<<<<<< HEAD
           
           # 修改 APP 名称
           sed -i 's/android:label="[^"]*"/android:label="视频工坊"/g' "$MANIFEST"
@@ -175,231 +71,16 @@ jobs:
           fi
           
           echo "✅ AndroidManifest.xml 已更新"
-          cat "$MANIFEST" | head -30
-=======
-          python3 -c "
-          import re
-          with open('$MANIFEST', 'r', encoding='utf-8') as f:
-              content = f.read()
-          new_conetent = re.sub(r'android:label=\"[^\"]*\"', 'android:label=\"${{ env.APP_NAME }}\"', content)
-          with open('$MANIFEST', 'w', encoding='eutf-8') as f:
-              f.write(new_content)
-          "
-          echo "✅ App name set to: ${{ env.APP_NAME }}"
->>>>>>> 031b8d8de44a9e35a3fe4f26da4ec75ccbdfff44
 
       - name: Fix Android Environment
         run: |
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
-          sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
+          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
           
-          # 修复 compileSdkVersion 以支持新权限
-          sed -i 's/compileSdkVersion.*/compileSdkVersion 33/g' android/app/build.gradle
-          sed -i 's/targetSdkVersion.*/targetSdkVersion 33/g' android/app/build.gradle
-
-      - name: Create Kotlin FFmpeg Bridge
-        run: |
-          KOTLIN_DIR="android/app/src/main/kotlin/com/example/video_cutter"
-          mkdir -p "$KOTLIN_DIR"
-          
-          cat > "$KOTLIN_DIR/MainActivity.kt" << 'KOTLIN_EOF'
-          package com.example.video_cutter
-
-          import android.os.Bundle
-          import android.util.Log
-          import io.flutter.embedding.android.FlutterActivity
-          import io.flutter.embedding.engine.FlutterEngine
-          import io.flutter.plugin.common.MethodChannel
-          import java.io.File
-          import java.io.FileOutputStream
-
-          class MainActivity : FlutterActivity() {
-              private val CHANNEL = "com.videocutter/ffmpeg"
-              private val TAG = "VideoCutter"
-              private var ffmpegPath: String? = null
-              private var ffprobePath: String? = null
-
-              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-                  super.configureFlutterEngine(flutterEngine)
-                  
-                  initFFmpegBinary()
-                  
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-                      when (call.method) {
-                          "cutVideo" -> {
-                              val input = call.argument<String>("input") ?: ""
-                              val output = call.argument<String>("output") ?: ""
-                              val start = call.argument<String>("start") ?: "0"
-                              val end = call.argument<String>("end") ?: "10"
-                              
-                              Log.d(TAG, "cutVideo: $input -> $output [$start - $end]")
-                              
-                              Thread {
-                                  val success = runFFmpeg(listOf(
-                                      "-y", "-ss", start, "-to", end,
-                                      "-i", input, "-c", "copy",
-                                      "-avoid_negative_ts", "1", output
-                                  ))
-                                  runOnUiThread { result.success(success) }
-                              }.start()
-                          }
-                          "stitchVideos" -> {
-                              val inputs = call.argument<List<String>>("inputs") ?: listOf()
-                              val output = call.argument<String>("output") ?: ""
-                              
-                              Log.d(TAG, "stitchVideos: ${inputs.size} files -> $output")
-                              
-                              Thread {
-                                  val success = stitchVideos(inputs, output)
-                                  runOnUiThread { result.success(success) }
-                              }.start()
-                          }
-                          "analyzeVideo" -> {
-                              val path = call.argument<String>("path") ?: ""
-                              Log.d(TAG, "analyzeVideo: $path")
-                              
-                              Thread {
-                                  val info = analyzeVideo(path)
-                                  runOnUiThread { result.success(info) }
-                              }.start()
-                          }
-                          "isReady" -> {
-                              val ready = ffmpegPath != null && 
-                                         File(ffmpegPath!!).exists() && 
-                                         File(ffmpegPath!!).length() > 1000000
-                              Log.d(TAG, "isReady: $ready, path: $ffmpegPath")
-                              result.success(ready)
-                          }
-                          "getFFmpegPath" -> result.success(ffmpegPath)
-                          else -> result.notImplemented()
-                      }
-                  }
-              }
-
-              private fun initFFmpegBinary() {
-                  try {
-                      val binDir = File(filesDir, "bin")
-                      binDir.mkdirs()
-                      
-                      listOf("ffmpeg", "ffprobe").forEach { name ->
-                          val outFile = File(binDir, name)
-                          Log.d(TAG, "Checking $name at ${outFile.absolutePath}")
-                          
-                          if (!outFile.exists() || outFile.length() < 1000000) {
-                              Log.d(TAG, "Copying $name from assets...")
-                              try {
-                                  assets.open("bin/$name").use { input ->
-                                      FileOutputStream(outFile).use { output ->
-                                          val buffer = ByteArray(8192)
-                                          var read: Int
-                                          while (input.read(buffer).also { read = it } != -1) {
-                                              output.write(buffer, 0, read)
-                                          }
-                                      }
-                                  }
-                                  outFile.setExecutable(true, false)
-                                  Log.d(TAG, "$name copied, size: ${outFile.length()}")
-                              } catch (e: Exception) {
-                                  Log.e(TAG, "Failed to copy $name: ${e.message}")
-                              }
-                          }
-                          
-                          if (name == "ffmpeg") ffmpegPath = outFile.absolutePath
-                          if (name == "ffprobe") ffprobePath = outFile.absolutePath
-                      }
-                      
-                      Log.d(TAG, "FFmpeg init complete. Path: $ffmpegPath, Size: ${File(ffmpegPath ?: "").length()}")
-                  } catch (e: Exception) {
-                      Log.e(TAG, "initFFmpegBinary failed: ${e.message}")
-                  }
-              }
-
-              private fun runFFmpeg(args: List<String>): Boolean {
-                  val path = ffmpegPath ?: return false
-                  val file = File(path)
-                  if (!file.exists() || file.length() < 1000000) {
-                      Log.e(TAG, "FFmpeg not available: ${file.length()} bytes")
-                      return false
-                  }
-                  
-                  return try {
-                      val cmd = listOf(path) + args
-                      Log.d(TAG, "Running: ${cmd.joinToString(" ")}")
-                      
-                      val process = ProcessBuilder(cmd)
-                          .redirectErrorStream(true)
-                          .start()
-                      
-                      val output = process.inputStream.bufferedReader().readText()
-                      val exitCode = process.waitFor()
-                      
-                      Log.d(TAG, "Exit code: $exitCode")
-                      if (exitCode != 0) Log.e(TAG, "Output: $output")
-                      
-                      exitCode == 0
-                  } catch (e: Exception) {
-                      Log.e(TAG, "runFFmpeg failed: ${e.message}")
-                      false
-                  }
-              }
-
-              private fun stitchVideos(inputs: List<String>, output: String): Boolean {
-                  val path = ffmpegPath ?: return false
-                  
-                  return try {
-                      val listFile = File(cacheDir, "concat_${System.currentTimeMillis()}.txt")
-                      listFile.writeText(inputs.joinToString("\n") { "file '$it'" })
-                      
-                      val cmd = listOf(path, "-y", "-f", "concat", "-safe", "0", 
-                                       "-i", listFile.absolutePath, "-c", "copy", output)
-                      
-                      Log.d(TAG, "Stitch cmd: ${cmd.joinToString(" ")}")
-                      
-                      val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
-                      val out = process.inputStream.bufferedReader().readText()
-                      val exitCode = process.waitFor()
-                      listFile.delete()
-                      
-                      Log.d(TAG, "Stitch exit: $exitCode")
-                      exitCode == 0
-                  } catch (e: Exception) {
-                      Log.e(TAG, "stitchVideos failed: ${e.message}")
-                      false
-                  }
-              }
-
-              private fun analyzeVideo(path: String): Map<String, Any>? {
-                  val probePath = ffprobePath ?: return null
-                  
-                  return try {
-                      val cmd = listOf(probePath, "-v", "error", "-select_streams", "v:0",
-                          "-show_entries", "stream=width,height,codec_name,r_frame_rate:format=duration",
-                          "-of", "csv=p=0", path)
-                      
-                      val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
-                      val output = process.inputStream.bufferedReader().readText().trim()
-                      process.waitFor()
-                      
-                      Log.d(TAG, "Probe output: $output")
-                      
-                      val parts = output.split(",")
-                      if (parts.size >= 4) {
-                          mapOf(
-                              "codec" to parts[0],
-                              "width" to (parts[1].toIntOrNull() ?: 0),
-                              "height" to (parts[2].toIntOrNull() ?: 0),
-                              "fps" to parts[3],
-                              "duration" to (parts.getOrNull(4)?.toDoubleOrNull() ?: 0.0)
-                          )
-                      } else null
-                  } catch (e: Exception) {
-                      Log.e(TAG, "analyzeVideo failed: ${e.message}")
-                      null
-                  }
-              }
-          }
-          KOTLIN_EOF
+          # 修复 compileSdkVersion 以支持新权限和 ffmpeg_kit
+          sed -i 's/compileSdkVersion.*/compileSdkVersion 34/g' android/app/build.gradle
+          sed -i 's/targetSdkVersion.*/targetSdkVersion 34/g' android/app/build.gradle
 
       - name: Install Dependencies
         run: flutter pub get
@@ -423,8 +104,10 @@ jobs:
         run: |
           SIZE=$(stat -c%s build/app/outputs/flutter-apk/app-release.apk)
           echo "APK size: $SIZE bytes ($(($SIZE / 1024 / 1024)) MB)"
-          if [ "$SIZE" -lt 10000000 ]; then
-            echo "⚠️ APK 太小，FFmpeg 可能没有正确打包"
+          if [ "$SIZE" -lt 5000000 ]; then
+            echo "⚠️ APK 太小，可能有问题"
+          else
+            echo "✅ APK 大小正常"
           fi
 
       - name: Upload APK
