@@ -74,13 +74,22 @@ jobs:
 
       - name: Fix Android Environment
         run: |
+          # 修复 Kotlin 版本
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
-          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
           
-          # 修复 compileSdkVersion 以支持新权限和 ffmpeg_kit
-          sed -i 's/compileSdkVersion.*/compileSdkVersion 34/g' android/app/build.gradle
-          sed -i 's/targetSdkVersion.*/targetSdkVersion 34/g' android/app/build.gradle
+          # 修复 minSdkVersion (ffmpeg_kit 需要 24+)
+          # 使用更精确的替换，避免破坏 flutter.xxx 变量引用
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/g' android/app/build.gradle
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/g' android/app/build.gradle
+          
+          # 如果是旧格式，也处理
+          sed -i 's/minSdkVersion 21/minSdkVersion 24/g' android/app/build.gradle
+          sed -i 's/minSdkVersion 16/minSdkVersion 24/g' android/app/build.gradle
+          
+          echo "✅ Android 环境已修复"
+          echo "--- build.gradle 内容 ---"
+          cat android/app/build.gradle | head -50
 
       - name: Install Dependencies
         run: flutter pub get
