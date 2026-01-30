@@ -141,6 +141,18 @@ jobs:
         with:
           gradle-version: 8.2
 
+      - name: Force Gradle 8.2 Usage
+        run: |
+          # 强制修改 wrapper 配置，确保 gradlew 下载并使用 8.2
+          mkdir -p android/gradle/wrapper
+          echo "distributionBase=GRADLE_USER_HOME" > android/gradle/wrapper/gradle-wrapper.properties
+          echo "distributionPath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
+          echo "zipStoreBase=GRADLE_USER_HOME" >> android/gradle/wrapper/gradle-wrapper.properties
+          echo "zipStorePath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-all.zip" >> android/gradle/wrapper/gradle-wrapper.properties
+          
+          cat android/gradle/wrapper/gradle-wrapper.properties
+
       - name: Generate Keystore
         run: |
           keytool -genkey -v -keystore upload-keystore.jks \
