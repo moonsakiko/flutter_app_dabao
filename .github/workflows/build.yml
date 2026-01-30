@@ -101,9 +101,11 @@ jobs:
 
       - name: 💣 Nuke Android 35 SDK (Nuclear Option)
         run: |
-          echo "SdkManager: Uninstalling build-tools;35.0.0 and platforms;android-35..."
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall "platforms;android-35" "build-tools;35.0.0"
-          echo "✅ Android 35 SDK 卸载完成，强制使用 Android 34"
+          echo "SdkManager: Force removing Android 35 to prevent AAPT2 crash..."
+          # 之前的 sdkmanager 命令可能失效，改用物理删除
+          sudo rm -rf /usr/local/lib/android/sdk/platforms/android-35
+          sudo rm -rf /usr/local/lib/android/sdk/build-tools/35.0.0
+          echo "✅ Android 35 SDK 已物理粉碎，强制回退至 Android 34"
 
       - name: Clean Build Environment
         run: flutter clean
