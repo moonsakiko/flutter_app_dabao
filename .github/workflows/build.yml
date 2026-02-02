@@ -1,24 +1,18 @@
-# ===============================
-# 视频工坊 - GitHub Actions 云打包配置
-# 方案：使用 FFmpegKit (Native Library Framework)
-# ===============================
-
-name: Flutter Build APK
+name: Build Android Release
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
 
+# 全局配置中心
 env:
-  APP_NAME: "视频工坊"
-  FILE_NAME: "VideoCutter"
+  APP_NAME: "小红书下载器"      # 安装到手机显示的中文名
+  FILE_NAME: "XHS_Downloader" # 下载的文件名 (英文)
+  APP_Package_Name: "xhs_downloader_app" # 项目文件夹名 (必须与 pubspec.yaml 一致)
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
     env:
-      LANG: "en_US.UTF-8"
+      LANG: "en_US.UTF-8" # 解决中文乱码
 
     steps:
       - name: Checkout Code
@@ -36,128 +30,61 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
 
+      # 1. 生成 Android 工程骨架 (因为我们不上传 android 目录)
       - name: Create Android Project
         run: |
-          if [ ! -f "android/settings.gradle" ]; then
-            echo "⚠️ Android project incomplete. Re-creating..."
-            flutter create . --platforms android --project-name video_cutter
+          if [ ! -d "android" ]; then
+            echo "🚀 Generating Android Scaffold..."
+            flutter create . --platforms android --project-name ${{ env.APP_Package_Name }}
           fi
 
-      - name: Configure Manifest (Name & Permissions)
+      # 2. 注入中文名称 (Manifest)
+      - name: Set App Name (Chinese)
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          
-          # 修改 APP 名称
-          sed -i 's/android:label="[^"]*"/android:label="视频工坊"/g' "$MANIFEST"
-          
-          # 添加必要的存储和文件访问权限
-          if ! grep -q "READ_EXTERNAL_STORAGE" "$MANIFEST"; then
-            sed -i 's/<application/<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"\/>\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"\/>\n\n    <application/g' "$MANIFEST"
-          fi
-          
-          if ! grep -q "requestLegacyExternalStorage" "$MANIFEST"; then
-             sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/g' "$MANIFEST"
-          fi
-          
-          echo "✅ AndroidManifest.xml 已更新"
+          python3 -c "
+          import re
+          with open('$MANIFEST', 'r', encoding='utf-8') as f:
+              content = f.read()
+          # 替换 label
+          new_content = re.sub(r'android:label=\"[^\"]*\"', 'android:label=\"${{ env.APP_NAME }}\"', content)
+          with open('$MANIFEST', 'w', encoding='utf-8') as f:
+              f.write(new_content)
+          "
+          echo "✅ App Name set to: ${{ env.APP_NAME }}"
 
-      - name: Configure Gradle Environment
+      # 3. 修复环境 (Kotlin 1.9.0 & MinSDK 21)
+      - name: Fix Android Environment
         run: |
-          # 1. 修复 Kotlin 版本
+          echo "🔧 Fixing Kotlin Version to 1.9.0..."
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
           
-          # 2. 升级 MinSDK 到 24 并锁定 CompileSDK 到 34 (避坑 Android 15)
-          # 注意：Flutter 新旧模板可能使用 compileSdkVersion 或 compileSdk，需同时覆盖
-          sed -i 's/compileSdkVersion .*/compileSdkVersion 34/g' android/app/build.gradle
-          sed -i 's/compileSdk .*/compileSdk = 34/g' android/app/build.gradle
-          sed -i 's/targetSdkVersion .*/targetSdkVersion 34/g' android/app/build.gradle
-          sed -i 's/targetSdk .*/targetSdk = 34/g' android/app/build.gradle
-          
-          # 确保 MinSDK 为 24
-          sed -i 's/minSdkVersion .*/minSdkVersion 24/g' android/app/build.gradle
-          sed -i 's/minSdk .*/minSdk = 24/g' android/app/build.gradle
-          
-          # 3. 🟢 强力仓库修复 (Ultimate Repository Fix)
-          # 许多新版 Flutter 项目默认锁定仓库配置 (FAIL_ON_PROJECT_REPOS)
-          # 必须先解锁，然后在 Project 级别强制注入 MavenCentral
-          
-          echo "🔓 Unlocking Gradle Repositories..."
-          find android -name "settings.gradle" -exec sed -i 's/FAIL_ON_PROJECT_REPOS/PREFER_PROJECT/g' {} +
-          
-          echo "💉 Injecting All Repositories..."
-          # 直接追加到 build.gradle 末尾，确保即使 plugins 块存在也能生效
-          printf "\nallprojects {\n    repositories {\n        google()\n        mavenCentral()\n        maven { url 'https://jitpack.io' }\n    }\n}\n" >> android/build.gradle
-          
-          # 4. 🟢 使用标准属性覆盖 (Standard Property Override)
-          # 许多 Flutter 插件会读取 project properties 来设置 SDK 版本
-          echo "flutter.compileSdkVersion=34" >> android/gradle.properties
-          echo "flutter.targetSdkVersion=34" >> android/gradle.properties
-          echo "flutter.minSdkVersion=24" >> android/gradle.properties
-          echo "compileSdkVersion=34" >> android/gradle.properties
-          echo "targetSdkVersion=34" >> android/gradle.properties
-          
-          echo "✅ Maven & Properties 配置完成"
+          echo "🔧 Fixing MinSdkVersion to 21..."
+          sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
 
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: 🩹 Patch Broken Plugins (Surgery)
+      # 4. 生成图标和启动页 (如果 assets 存在)
+      - name: Generate Assets
         run: |
-          echo "Finding ffmpeg_kit_flutter_new in pub-cache..."
-          # 查找 pub cache 中的插件路径
-          PLUGIN_PATH=$(find $HOME/.pub-cache -name "ffmpeg_kit_flutter_new*" -type d | head -n 1)
-          
-          if [ -z "$PLUGIN_PATH" ]; then
-             echo "❌ Plugin not found in default cache, trying local .dart_tool..."
-             # 有时 CI 环境会把 cache 放别处，尝试另一路径
-             PLUGIN_PATH=$(find .dart_tool/pub/files -name "ffmpeg_kit_flutter_new*" -type d 2>/dev/null | head -n 1)
-          fi
-          
-          if [ -n "$PLUGIN_PATH" ]; then
-             echo "✅ Found plugin at: $PLUGIN_PATH"
-             GRADLE_FILE="$PLUGIN_PATH/android/build.gradle"
-             
-             if [ -f "$GRADLE_FILE" ]; then
-                echo "🔧 Patching $GRADLE_FILE..."
-                # 强制替换 compileSdkVersion 和 targetSdkVersion
-                # 使用 sed 强行把任何 compileSdk (包括 35 或变量) 替换为 34
-                sed -i 's/compileSdkVersion .*/compileSdkVersion 34/g' "$GRADLE_FILE"
-                sed -i 's/compileSdk .*/compileSdk = 34/g' "$GRADLE_FILE"
-                sed -i 's/targetSdkVersion .*/targetSdkVersion 34/g' "$GRADLE_FILE"
-                sed -i 's/targetSdk .*/targetSdk = 34/g' "$GRADLE_FILE"
-                
-                cat "$GRADLE_FILE" | grep "compileSdk"
-                echo "✅ Patch applied successfully."
-             else
-                echo "⚠️ Plugin found but build.gradle missing!"
+          if [ -f "pubspec.yaml" ]; then
+             echo "🎨 Checking for assets config..."
+             if grep -q "flutter_launcher_icons" pubspec.yaml; then
+                dart run flutter_launcher_icons || echo "⚠️ Icon generation skipped (missing assets?)"
              fi
-          else
-             echo "⚠️ Could not locate ffmpeg_kit_flutter_new package to patch."
+             if grep -q "flutter_native_splash" pubspec.yaml; then
+                dart run flutter_native_splash:create || echo "⚠️ Splash generation skipped"
+             fi
           fi
 
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2
-        with:
-          gradle-version: 8.2
-
-      - name: Force Gradle 8.2 Usage
-        run: |
-          # 强制修改 wrapper 配置，确保 gradlew 下载并使用 8.2
-          mkdir -p android/gradle/wrapper
-          echo "distributionBase=GRADLE_USER_HOME" > android/gradle/wrapper/gradle-wrapper.properties
-          echo "distributionPath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
-          echo "zipStoreBase=GRADLE_USER_HOME" >> android/gradle/wrapper/gradle-wrapper.properties
-          echo "zipStorePath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-all.zip" >> android/gradle/wrapper/gradle-wrapper.properties
-          
-          cat android/gradle/wrapper/gradle-wrapper.properties
-
+      # 5. 云端签名 (Keystore)
       - name: Generate Keystore
         run: |
           keytool -genkey -v -keystore upload-keystore.jks \
             -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias upload -dname "CN=Android, OU=Android, O=Android, L=Android, S=Android, C=US" \
+            -alias upload -dname "CN=Android, OU=User, O=User, L=City, S=State, C=US" \
             -storepass android -keypass android
           
           echo "storePassword=android" > android/key.properties
@@ -165,23 +92,13 @@ jobs:
           echo "keyAlias=upload" >> android/key.properties
           echo "storeFile=../../upload-keystore.jks" >> android/key.properties
 
-      - name: Build APK (Detailed)
-        # 使用详细日志以便排查
-        run: flutter build apk --release --verbose
+      # 6. 打包 Release APK
+      - name: Build Release APK
+        run: flutter build apk --release --target-platform android-arm64
 
-      - name: Check APK Size
-        run: |
-          SIZE=$(stat -c%s build/app/outputs/flutter-apk/app-release.apk)
-          echo "APK size: $SIZE bytes ($(($SIZE / 1024 / 1024)) MB)"
-          if [ "$SIZE" -lt 20000000 ]; then
-            echo "⚠️ APK 过小，依赖可能未正确打包"
-            exit 1
-          else
-            echo "✅ APK 大小正常 (包含原生库)"
-          fi
-
-      - name: Upload APK
+      # 7. 重命名与上传
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.FILE_NAME }}_Release
+          name: ${{ env.FILE_NAME }}_Install_Package
           path: build/app/outputs/flutter-apk/app-release.apk

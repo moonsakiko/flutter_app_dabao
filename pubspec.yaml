@@ -1,43 +1,60 @@
-name: video_cutter
-description: "无损视频剪切与智能拼接工具"
+name: xhs_downloader_app
+description: A XHS Downloader capable of extracting high-quality media via WebView.
 publish_to: 'none'
-version: 1.0.1+3
+version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.1.0 <4.0.0'
 
-# ===============================
-# 依赖配置 (使用原生 FFmpeg 二进制)
-# ===============================
 dependencies:
   flutter:
     sdk: flutter
-
-  cupertino_icons: ^1.0.8
   
-  # 文件选择器
-  file_picker: ^6.1.1
+  # UI Icons
+  cupertino_icons: ^1.0.6
   
-  # 权限管理
-  permission_handler: ^11.1.0
+  # Browser Core (Crawling)
+  webview_flutter: ^4.7.0
   
-  # 路径获取
-  path_provider: ^2.1.1
+  # Network (Downloading)
+  dio: ^5.4.1
   
-  # 本地存储 (设置保存)
+  # System Capability
+  permission_handler: ^11.3.0
+  path_provider: ^2.1.2
+  gal: ^2.2.0  # Modern Gallery Saver (Android 14 Compatible)
+  
+  # Utils
+  path: ^1.9.0
   shared_preferences: ^2.2.2
-
-  # 社区维护版 (解决官方版 artifacts 缺失问题)
-  ffmpeg_kit_flutter_new: ^4.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  
+  # Assets Generator
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.3.1
 
-# ===============================
-# Flutter 资源配置
-# ===============================
-# Flutter 资源配置 (Moved to native assets)
 flutter:
   uses-material-design: true
+  
+  # Assets Registration
+  # assets:
+  #   - assets/images/
+
+# Icon Configuration
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: false
+  image_path: "assets/images/icon.png"
+  min_sdk_android: 21
+
+# Splash Configuration
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: "assets/images/splash.png"
+  android_12:
+    color: "#FFFFFF"
+    image: "assets/images/splash.png"
