@@ -1,6 +1,8 @@
 name: Build Android Release
 on:
   workflow_dispatch:
+  push:
+    branches: [ main, master ]
 
 # 全局配置中心
 env:
@@ -66,18 +68,8 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      # 4. 生成图标和启动页 (如果 assets 存在)
-      - name: Generate Assets
-        run: |
-          if [ -f "pubspec.yaml" ]; then
-             echo "🎨 Checking for assets config..."
-             if grep -q "flutter_launcher_icons" pubspec.yaml; then
-                dart run flutter_launcher_icons || echo "⚠️ Icon generation skipped (missing assets?)"
-             fi
-             if grep -q "flutter_native_splash" pubspec.yaml; then
-                dart run flutter_native_splash:create || echo "⚠️ Splash generation skipped"
-             fi
-          fi
+      # 4. 生成图标和启动页 (SKIPPED: No Assets)
+      # - name: Generate Assets
 
       # 5. 云端签名 (Keystore)
       - name: Generate Keystore

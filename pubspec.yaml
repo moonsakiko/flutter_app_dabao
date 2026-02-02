@@ -22,7 +22,7 @@ dependencies:
   # System Capability
   permission_handler: ^11.3.0
   path_provider: ^2.1.2
-  gal: ^2.2.0  # Modern Gallery Saver (Android 14 Compatible)
+  image_gallery_saver: ^2.0.3 # Replaced gal due to build error
   
   # Utils
   path: ^1.9.0
@@ -33,9 +33,9 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^3.0.0
   
-  # Assets Generator
-  flutter_launcher_icons: ^0.13.1
-  flutter_native_splash: ^2.3.1
+  # Assets Generator (Disabled until assets are uploaded)
+  # flutter_launcher_icons: ^0.13.1
+  # flutter_native_splash: ^2.3.1
 
 flutter:
   uses-material-design: true
@@ -44,17 +44,17 @@ flutter:
   # assets:
   #   - assets/images/
 
-# Icon Configuration
-flutter_launcher_icons:
-  android: "launcher_icon"
-  ios: false
-  image_path: "assets/images/icon.png"
-  min_sdk_android: 21
+# Icon Configuration (Commented out)
+# flutter_launcher_icons:
+#   android: "launcher_icon"
+#   ios: false
+#   image_path: "assets/images/icon.png"
+#   min_sdk_android: 21
 
-# Splash Configuration
-flutter_native_splash:
-  color: "#FFFFFF"
-  image: "assets/images/splash.png"
-  android_12:
-    color: "#FFFFFF"
-    image: "assets/images/splash.png"
+# Splash Configuration (Commented out)
+# flutter_native_splash:
+#   color: "#FFFFFF"
+#   image: "assets/images/splash.png"
+#   android_12:
+#     color: "#FFFFFF"
+#     image: "assets/images/splash.png"
