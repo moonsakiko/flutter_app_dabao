@@ -51,6 +51,11 @@ class _BrowserPageState extends State<BrowserPage> {
               _controller.loadRequest(Uri.parse('https://www.xiaohongshu.com/explore'));
             },
           ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: "刷新页面",
+            onPressed: () => _controller.reload(),
+          ),
         ],
       ),
       body: Stack(
@@ -73,33 +78,62 @@ class _BrowserPageState extends State<BrowserPage> {
 
   // --- Core Extraction Logic ---
   Future<void> _parseAndDownload() async {
+    String debugLog = "=== Debug Info ===\n";
     try {
       _showSnack("正在分析页面...");
 
-      // 1. Get Current URL & Cookies first
+      // 1. Get Environment
       final String? currentUrl = await _controller.currentUrl();
+      debugLog += "URL: $currentUrl\n";
+      
       final String cookieStr = await _controller.runJavaScriptReturningResult('document.cookie') as String;
-      final cleanCookie = cookieStr.replaceAll('"', '');
+      // Strip outer quotes if present (standard webview behavior)
+      final cleanCookie = cookieStr.startsWith('"') && cookieStr.endsWith('"') 
+          ? cookieStr.substring(1, cookieStr.length - 1) 
+          : cookieStr;
+          
+      debugLog += "Cookie Len: ${cleanCookie.length}\n";
+      
+      if (cleanCookie.length < 50) {
+         debugLog += "⚠️ Cookie 过短，可能未登录或获取失败\n";
+      }
 
       XHSNote? note;
       List<String> noteIds = [];
 
-      // strategy 0: SPA Handle (Url Detection)
-      if (currentUrl != null && currentUrl.contains('/explore/')) {
-          final uri = Uri.parse(currentUrl);
-          if (uri.pathSegments.isNotEmpty) {
-             final possibleId = uri.pathSegments.last;
-             // Valid XHS ID is 24 chars
-             if (possibleId.length == 24) {
-                 note = await _fetchNoteDetail(possibleId, cleanCookie);
+      // Strategy 0: Robust URL Regex Scan
+      // Look for ANY 24-char hex string in the URL (typical XHS Note ID)
+      if (currentUrl != null) {
+          final RegExp noteIdRegex = RegExp(r'[a-f0-9]{24}');
+          final matches = noteIdRegex.allMatches(currentUrl);
+          
+          if (matches.isNotEmpty) {
+             debugLog += "Found ${matches.length} IDs in URL\n";
+             for (final match in matches) {
+                final id = match.group(0)!;
+                debugLog += "Checking ID: $id... ";
+                
+                try {
+                   note = await _fetchNoteDetail(id, cleanCookie);
+                   if (note != null) {
+                      debugLog += "Success!\n";
+                      break; // Found it
+                   } else {
+                      debugLog += "Null Data\n";
+                   }
+                } catch (e) {
+                   debugLog += "Error: $e\n";
+                }
              }
+          } else {
+             debugLog += "No IDs found in URL\n";
           }
       }
 
       // If Strategy 0 worked, skip JS injection
       if (note != null && note.resources.isNotEmpty) {
          _showConfirmDialog(
-           title: "发现 1 篇笔记 (SPA)",
+           title: "发现 1 篇笔记 (API)",
            content: "标题: ${note.title}\n包含 ${note.resources.length} 个资源",
            onConfirm: () => _startDownload(note!),
          );
@@ -107,80 +141,118 @@ class _BrowserPageState extends State<BrowserPage> {
       }
 
       // Strategy 1: JS Injection (Fallback)
+      debugLog += "\nTrying JS Injection...\n";
       final result = await _controller.runJavaScriptReturningResult('''
         (function() {
           try {
-            return JSON.stringify(window.__INITIAL_STATE__);
+             if (window.__INITIAL_STATE__) return JSON.stringify(window.__INITIAL_STATE__);
+             return null;
           } catch(e) {
-            return null;
+            return "ERR:" + e.toString();
           }
         })();
       ''');
 
-      if (result.toString() == 'null' || result.toString() == '{}') {
-        _showSnack("未能提取到数据 (请尝试刷新页面)");
-        return;
-      }
-      
-      String jsonStr = result.toString();
-      if (jsonStr.startsWith('"') && jsonStr.endsWith('"')) {
-        jsonStr = jsonStr.substring(1, jsonStr.length - 1);
-        jsonStr = jsonStr.replaceAll(r'\"', '"').replaceAll(r'\\', r'\');
+      final resultStr = result.toString();
+      debugLog += "JS Result Len: ${resultStr.length}\n";
+
+      if (resultStr != 'null' && resultStr != '{}' && !resultStr.startsWith('"ERR:')) {
+          String jsonStr = resultStr;
+          if (jsonStr.startsWith('"') && jsonStr.endsWith('"')) {
+            jsonStr = jsonStr.substring(1, jsonStr.length - 1);
+            jsonStr = jsonStr.replaceAll(r'\"', '"').replaceAll(r'\\', r'\');
+          }
+          
+          try {
+             final Map<String, dynamic> state = jsonDecode(jsonStr);
+             
+             // Try parse note directly
+             if (note == null) {
+                note = XHSNote.fromJson(state);
+                if (note != null) debugLog += "JS Note parsed: ${note.title}\n";
+             }
+             
+             // Try parse user profile or feed list
+             if (state['user'] != null && state['user']['notes'] != null) {
+                 final notes = state['user']['notes'];
+                 if (notes is List) {
+                    noteIds.addAll(notes.map((e) => e['noteId'].toString()));
+                 }
+                 debugLog += "Found Profile Notes: ${notes.length}\n";
+             }
+             
+             // Regex Fallback (Scan entire state for IDs)
+             final rawStateStr = jsonEncode(state);
+             final RegExp idRegex = RegExp(r'"noteId":"([a-f0-9]{24})"', caseSensitive: false);
+             final ids = idRegex.allMatches(rawStateStr).map((m) => m.group(1)!).toSet().toList();
+             if (ids.isNotEmpty) {
+               noteIds.addAll(ids);
+               debugLog += "Regex Scan Found: ${ids.length}\n";
+             }
+             
+          } catch(e) {
+             debugLog += "JSON Parse Error: $e\n";
+          }
+      } else {
+          debugLog += "JS State is Null/Empty (SPA Navigation?)\n";
       }
 
-      final Map<String, dynamic> state = jsonDecode(jsonStr);
-      
-      // --- Strategy A: Detail Page ---
-      // Use existing 'note' variable
-      if (note == null) {
-         note = XHSNote.fromJson(state);
-      }
-      
+      // Final Decision
       if (note != null && note!.resources.isNotEmpty) {
          _showConfirmDialog(
            title: "发现 1 篇笔记",
            content: "标题: ${note!.title}\n包含 ${note!.resources.length} 个资源",
            onConfirm: () => _startDownload(note!),
          );
-         return;
-      }
-
-      // --- Strategy B: Batch/Collection Page ---
-      // Use existing 'noteIds' variable
-      
-      // 1. Check User Profile / Collection
-      if (state['user'] != null && state['user']['notes'] != null) {
-         final notes = state['user']['notes'];
-         if (notes is List) {
-            noteIds.addAll(notes.map((e) => e['noteId'].toString()));
-         }
-      }
-      
-      // 2. Generic scan
-      final rawStateStr = jsonEncode(state);
-      final RegExp idRegex = RegExp(r'"noteId":"([a-f0-9]{24})"', caseSensitive: false);
-      final ids = idRegex.allMatches(rawStateStr).map((m) => m.group(1)!).toSet().toList();
-      
-      if (ids.isNotEmpty) {
-        noteIds.addAll(ids);
-      }
-
-      if (noteIds.isNotEmpty) {
-        // Filter out nulls/duplicates
-        noteIds = noteIds.toSet().toList();
-        
+      } else if (noteIds.isNotEmpty) {
+        final uniqueIds = noteIds.toSet().toList();
         _showConfirmDialog(
            title: "发现合辑/列表",
-           content: "检测到 ${noteIds.length} 篇笔记\n是否批量下载？(将后台解析)",
-           onConfirm: () => _startBatchDownload(noteIds),
+           content: "检测到 ${uniqueIds.length} 篇笔记\n是否批量下载？(将后台解析)",
+           onConfirm: () => _startBatchDownload(uniqueIds),
         );
       } else {
-        _showSnack("未在此页面发现笔记或资源");
+        // Only show debug dialog if absolutely nothing found
+        _showErrorDialog(debugLog);
       }
 
     } catch (e) {
-      _showSnack("解析错误: $e");
+      debugLog += "\nCRITICAL ERROR: $e";
+      _showErrorDialog(debugLog);
     }
+  }
+
+  void _showErrorDialog(String log) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("未能提取数据"),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("如果您已在帖子页面，请尝试刷新后重试。\n\n技术调试信息:", style: TextStyle(fontSize: 13)),
+              const SizedBox(height: 10),
+              Container(
+                 width: double.maxFinite,
+                 padding: const EdgeInsets.all(8),
+                 color: Colors.grey[200],
+                 child: SelectableText(log, style: const TextStyle(fontSize: 10, fontFamily: 'monospace')),
+              )
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("关闭")),
+          FilledButton(onPressed: () { 
+             Navigator.pop(ctx);
+             _controller.reload();
+          }, child: const Text("刷新页面")),
+        ],
+      ),
+    );
   }
 
   void _showConfirmDialog({required String title, required String content, required VoidCallback onConfirm}) {
@@ -220,7 +292,7 @@ class _BrowserPageState extends State<BrowserPage> {
      // WebViewCookieManager does not support getCookies, use JS instead
      final String cookieStr = await _controller.runJavaScriptReturningResult('document.cookie') as String;
      // The result might be quoted "key=value...", strip quotes
-     final cleanCookie = cookieStr.replaceAll('"', '');
+     final cleanCookie = cookieStr.startsWith('"') ? cookieStr.substring(1, cookieStr.length-1) : cookieStr;
      
      // 2. Background Processing
      int success = 0;
