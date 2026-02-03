@@ -74,7 +74,39 @@ class _BrowserPageState extends State<BrowserPage> {
   // --- Core Extraction Logic ---
   Future<void> _parseAndDownload() async {
     try {
-      // 1. Inject JS to get __INITIAL_STATE__
+      _showSnack("正在分析页面...");
+
+      // 1. Get Current URL & Cookies first
+      final String? currentUrl = await _controller.currentUrl();
+      final String cookieStr = await _controller.runJavaScriptReturningResult('document.cookie') as String;
+      final cleanCookie = cookieStr.replaceAll('"', '');
+
+      XHSNote? note;
+      List<String> noteIds = [];
+
+      // strategy 0: SPA Handle (Url Detection)
+      if (currentUrl != null && currentUrl.contains('/explore/')) {
+          final uri = Uri.parse(currentUrl);
+          if (uri.pathSegments.isNotEmpty) {
+             final possibleId = uri.pathSegments.last;
+             // Valid XHS ID is 24 chars
+             if (possibleId.length == 24) {
+                 note = await _fetchNoteDetail(possibleId, cleanCookie);
+             }
+          }
+      }
+
+      // If Strategy 0 worked, skip JS injection
+      if (note != null && note.resources.isNotEmpty) {
+         _showConfirmDialog(
+           title: "发现 1 篇笔记 (SPA)",
+           content: "标题: ${note.title}\n包含 ${note.resources.length} 个资源",
+           onConfirm: () => _startDownload(note!),
+         );
+         return;
+      }
+
+      // Strategy 1: JS Injection (Fallback)
       final result = await _controller.runJavaScriptReturningResult('''
         (function() {
           try {
@@ -86,7 +118,7 @@ class _BrowserPageState extends State<BrowserPage> {
       ''');
 
       if (result.toString() == 'null' || result.toString() == '{}') {
-        _showSnack("未能提取到数据，请确保页面已加载完毕！");
+        _showSnack("未能提取到数据 (请尝试刷新页面)");
         return;
       }
       
@@ -99,41 +131,38 @@ class _BrowserPageState extends State<BrowserPage> {
       final Map<String, dynamic> state = jsonDecode(jsonStr);
       
       // --- Strategy A: Detail Page ---
-      final note = XHSNote.fromJson(state);
-      if (note != null && note.resources.isNotEmpty) {
+      // Use existing 'note' variable
+      if (note == null) {
+         note = XHSNote.fromJson(state);
+      }
+      
+      if (note != null && note!.resources.isNotEmpty) {
          _showConfirmDialog(
            title: "发现 1 篇笔记",
-           content: "标题: ${note.title}\n包含 ${note.resources.length} 个资源",
-           onConfirm: () => _startDownload(note),
+           content: "标题: ${note!.title}\n包含 ${note!.resources.length} 个资源",
+           onConfirm: () => _startDownload(note!),
          );
          return;
       }
 
       // --- Strategy B: Batch/Collection Page ---
-      // Try to find note lists in user dict or feed
-      List<String> noteIds = [];
+      // Use existing 'noteIds' variable
       
       // 1. Check User Profile / Collection
       if (state['user'] != null && state['user']['notes'] != null) {
-         // User Profile tab
          final notes = state['user']['notes'];
          if (notes is List) {
-            noteIds = notes.map((e) => e['noteId'].toString()).toList();
-         } else if (notes is Map) {
-            // Sometimes it's a map with 'value' list
-            // Just scan nicely
+            noteIds.addAll(notes.map((e) => e['noteId'].toString()));
          }
       }
       
-      // 2. Generic "notes" or "feed" scan (Fallback)
-      // Extract all top-level keys that look like note lists
-      // This is a heuristic scan for "noteId"
+      // 2. Generic scan
       final rawStateStr = jsonEncode(state);
       final RegExp idRegex = RegExp(r'"noteId":"([a-f0-9]{24})"', caseSensitive: false);
       final ids = idRegex.allMatches(rawStateStr).map((m) => m.group(1)!).toSet().toList();
       
       if (ids.isNotEmpty) {
-        noteIds = ids;
+        noteIds.addAll(ids);
       }
 
       if (noteIds.isNotEmpty) {
