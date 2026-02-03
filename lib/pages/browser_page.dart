@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:xhs_downloader_app/models/xhs_note.dart';
 import 'package:xhs_downloader_app/services/download_service.dart';
+import 'package:dio/dio.dart' as import_dio; // Alias to avoid conflict if any
 
 class BrowserPage extends StatefulWidget {
   const BrowserPage({super.key});
@@ -85,65 +86,169 @@ class _BrowserPageState extends State<BrowserPage> {
       ''');
 
       if (result.toString() == 'null' || result.toString() == '{}') {
-        _showSnack("未能提取到数据，请确保在笔记详情页！");
+        _showSnack("未能提取到数据，请确保页面已加载完毕！");
         return;
       }
       
       String jsonStr = result.toString();
-      // Remove surrounding quotes if they exist
       if (jsonStr.startsWith('"') && jsonStr.endsWith('"')) {
         jsonStr = jsonStr.substring(1, jsonStr.length - 1);
-        // Unescape standard json escapes
         jsonStr = jsonStr.replaceAll(r'\"', '"').replaceAll(r'\\', r'\');
       }
 
-      // 2. Parse Logic
       final Map<String, dynamic> state = jsonDecode(jsonStr);
-      final note = XHSNote.fromJson(state);
       
-      if (note == null || note.resources.isEmpty) {
-        _showSnack("当前页面不是有效的笔记详情页");
-        return;
+      // --- Strategy A: Detail Page ---
+      final note = XHSNote.fromJson(state);
+      if (note != null && note.resources.isNotEmpty) {
+         _showConfirmDialog(
+           title: "发现 1 篇笔记",
+           content: "标题: ${note.title}\n包含 ${note.resources.length} 个资源",
+           onConfirm: () => _startDownload(note),
+         );
+         return;
       }
 
-      // 3. Confirm Dialog
-      if (!mounted) return;
-      final confirm = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text("发现 ${note.resources.length} 个资源"),
-          content: Text("标题: ${note.title}\n即将下载到相册 (RedBookDownload)"),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false), 
-              child: const Text("取消")
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("开始下载"),
-            ),
-          ],
-        ),
-      );
+      // --- Strategy B: Batch/Collection Page ---
+      // Try to find note lists in user dict or feed
+      List<String> noteIds = [];
+      
+      // 1. Check User Profile / Collection
+      if (state['user'] != null && state['user']['notes'] != null) {
+         // User Profile tab
+         final notes = state['user']['notes'];
+         if (notes is List) {
+            noteIds = notes.map((e) => e['noteId'].toString()).toList();
+         } else if (notes is Map) {
+            // Sometimes it's a map with 'value' list
+            // Just scan nicely
+         }
+      }
+      
+      // 2. Generic "notes" or "feed" scan (Fallback)
+      // Extract all top-level keys that look like note lists
+      // This is a heuristic scan for "noteId"
+      final rawStateStr = jsonEncode(state);
+      final RegExp idRegex = RegExp(r'"noteId":"([a-f0-9]{24})"', caseSensitive: false);
+      final ids = idRegex.allMatches(rawStateStr).map((m) => m.group(1)!).toSet().toList();
+      
+      if (ids.isNotEmpty) {
+        noteIds = ids;
+      }
 
-      if (confirm == true) {
-        _startDownload(note);
+      if (noteIds.isNotEmpty) {
+        // Filter out nulls/duplicates
+        noteIds = noteIds.toSet().toList();
+        
+        _showConfirmDialog(
+           title: "发现合辑/列表",
+           content: "检测到 ${noteIds.length} 篇笔记\n是否批量下载？(将后台解析)",
+           onConfirm: () => _startBatchDownload(noteIds),
+        );
+      } else {
+        _showSnack("未在此页面发现笔记或资源");
       }
 
     } catch (e) {
-      _showSnack("解析失败: $e");
+      _showSnack("解析错误: $e");
     }
   }
 
+  void _showConfirmDialog({required String title, required String content, required VoidCallback onConfirm}) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              onConfirm();
+            },
+            child: const Text("开始"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Single Download
   Future<void> _startDownload(XHSNote note) async {
-    _showSnack("开始后台下载...");
-    
+    _showSnack("开始下载: ${note.title}");
     final urls = note.resources.map((e) => e.url).toList();
-    final stats = await DownloadService.downloadAll(urls, onProgress: (cur, total) {
-       // Optional: update UI
-    });
-    
-    _showSnack("下载完成! 成功: ${stats['success']}, 失败: ${stats['fail']}");
+    final stats = await DownloadService.downloadAll(urls);
+    _showSnack("完成! 成功:${stats['success']} 失败:${stats['fail']}");
+  }
+
+  // Batch Download Logic
+  Future<void> _startBatchDownload(List<String> noteIds) async {
+     _showSnack("正在后台解析 ${noteIds.length} 篇笔记...");
+     
+     // 1. Sync Cookies from WebView to Dio
+     final cookieMgr = WebViewCookieManager();
+     final cookies = await cookieMgr.getCookies(Uri.parse('https://www.xiaohongshu.com'));
+     final cookieStr = cookies.map((c) => "${c.name}=${c.value}").join('; ');
+     
+     // 2. Background Processing
+     int success = 0;
+     for (var i = 0; i < noteIds.length; i++) {
+        final id = noteIds[i];
+        
+        // Update UI every few items? 
+        // Showing simple snackbar progress for now
+        if (i % 3 == 0) _showSnack("正在处理第 ${i+1}/${noteIds.length} 篇...");
+
+        try {
+           final note = await _fetchNoteDetail(id, cookieStr);
+           if (note != null) {
+              final urls = note.resources.map((e) => e.url).toList();
+              final stats = await DownloadService.downloadAll(urls);
+              if (stats['success']! > 0) success++;
+           }
+        } catch (e) {
+           print("Batch Error [$id]: $e");
+        }
+        
+        // Anti-ban delay
+        await Future.delayed(const Duration(milliseconds: 1500));
+     }
+     
+     _showSnack("批量任务结束! 成功处理笔记: $success 篇");
+  }
+
+  // Fetch HTML and parse manually
+  Future<XHSNote?> _fetchNoteDetail(String noteId, String cookie) async {
+     try {
+       final dio = import_dio.Dio(); // Need to handle import alias if necessary, or just use Dio()
+       final uri = "https://www.xiaohongshu.com/explore/$noteId";
+       
+       final response = await dio.get(
+          uri,
+          options: import_dio.Options(
+             headers: {
+                "Cookie": cookie,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+             }
+          )
+       );
+       
+       final html = response.data.toString();
+       // Regex Extract <script>window.__INITIAL_STATE__=
+       final match = RegExp(r'window\.__INITIAL_STATE__=(.*?)</script>').firstMatch(html);
+       if (match != null) {
+          String jsonStr = match.group(1)!;
+          // Sometimes it has undefined, replace it
+          jsonStr = jsonStr.replaceAll("undefined", "null");
+          final state = jsonDecode(jsonStr);
+          return XHSNote.fromJson(state);
+       }
+     } catch (e) {
+       print("Fetch Detail Error: $e");
+     }
+     return null;
   }
 
   void _showSnack(String msg) {
