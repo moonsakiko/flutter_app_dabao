@@ -20,10 +20,19 @@ class _BrowserPageState extends State<BrowserPage> {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36") // 1. 伪装成电脑
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (url) => setState(() => _isLoading = true),
           onPageFinished: (url) => setState(() => _isLoading = false),
+          // 2. 拦截 "打开App" 的跳转 (xhsdiscover://)
+          onNavigationRequest: (request) {
+            if (!request.url.startsWith('http')) {
+              debugPrint('拦截跳转: ${request.url}'); 
+              return NavigationDecision.prevent; // 阻止跳转
+            }
+            return NavigationDecision.navigate;
+          },
         ),
       )
       ..loadRequest(Uri.parse('https://www.xiaohongshu.com/explore'));
