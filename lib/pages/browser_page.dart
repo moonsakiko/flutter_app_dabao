@@ -78,6 +78,15 @@ class _BrowserPageState extends State<BrowserPage> {
   // 核心提取逻辑 (移植自 Python 版 web_album_downloader.py)
   // =====================================================
   Future<void> _parseAndDownload() async {
+    _showSnack("正在刷新页面以获取最新数据...");
+    
+    // 关键修复: SPA 导航后 __INITIAL_STATE__ 可能是旧数据
+    // 先刷新页面确保获取当前帖子的新鲜数据
+    await _controller.reload();
+    
+    // 等待页面加载完成
+    await Future.delayed(const Duration(seconds: 2));
+    
     _showSnack("正在提取页面数据...");
     
     // 核心: 在 WebView 内部执行 JS 脚本，直接读取 window.__INITIAL_STATE__
