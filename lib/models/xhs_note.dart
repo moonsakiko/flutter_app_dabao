@@ -19,8 +19,14 @@ class XHSNote {
 
       // Extract the first key (noteId)
       final String id = noteMap.keys.first;
-      final info = noteMap[id];
+      var info = noteMap[id];
       if (info == null) return null;
+
+      // Handle nested structure (New XHS Web version)
+      // Structure: { note: { ...real data... }, comments: [], ... }
+      if (info['note'] != null && info['note'] is Map) {
+         info = info['note'];
+      }
 
       final title = info['title'] ?? info['desc'] ?? 'Untitled';
       final List<String> tags = (info['tagList'] as List? ?? [])
