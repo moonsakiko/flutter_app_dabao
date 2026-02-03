@@ -194,6 +194,7 @@ class _BrowserPageState extends State<BrowserPage> {
           debug.push("Extracted images: " + images.length);
           if (images.length > 0) {
             debug.push("First image url: " + (images[0].url || "EMPTY").substring(0, 50));
+            debug.push("First image fileId: " + (images[0].fileId || "EMPTY"));
           }
 
           // ===== 提取视频 =====
@@ -293,10 +294,11 @@ class _BrowserPageState extends State<BrowserPage> {
         return;
       }
       
-      // 显示确认对话框
+      // 显示确认对话框 - 包含 URL 预览便于调试
+      final urlPreview = downloadUrls.take(3).map((u) => u.length > 60 ? "${u.substring(0, 60)}..." : u).join("\n");
       _showConfirmDialog(
         title: "发现 1 篇笔记",
-        content: "标题: $title\n包含 ${downloadUrls.length} 个资源\n\n是否开始下载？",
+        content: "标题: $title\n包含 ${downloadUrls.length} 个资源\n\nURL 预览:\n$urlPreview\n\n是否开始下载？",
         onConfirm: () async {
           _showSnack("开始下载 ${downloadUrls.length} 个文件...");
           final stats = await DownloadService.downloadAll(downloadUrls);
