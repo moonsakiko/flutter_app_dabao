@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:xhs_downloader_app/models/xhs_note.dart';
 import 'package:xhs_downloader_app/services/download_service.dart';
-import 'package:dio/dio.dart' as import_dio; // Alias to avoid conflict if any
 
 class BrowserPage extends StatefulWidget {
   const BrowserPage({super.key});
@@ -21,16 +20,15 @@ class _BrowserPageState extends State<BrowserPage> {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36") // 1. 伪装成电脑
+      ..setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (url) => setState(() => _isLoading = true),
           onPageFinished: (url) => setState(() => _isLoading = false),
-          // 2. 拦截 "打开App" 的跳转 (xhsdiscover://)
           onNavigationRequest: (request) {
             if (!request.url.startsWith('http')) {
               debugPrint('拦截跳转: ${request.url}'); 
-              return NavigationDecision.prevent; // 阻止跳转
+              return NavigationDecision.prevent;
             }
             return NavigationDecision.navigate;
           },
@@ -76,154 +74,189 @@ class _BrowserPageState extends State<BrowserPage> {
     );
   }
 
-  // --- Core Extraction Logic ---
+  // =====================================================
+  // 核心提取逻辑 (移植自 Python 版 web_album_downloader.py)
+  // =====================================================
   Future<void> _parseAndDownload() async {
-    String debugLog = "=== Debug Info ===\n";
+    _showSnack("正在提取页面数据...");
+    
+    // 核心: 在 WebView 内部执行 JS 脚本，直接读取 window.__INITIAL_STATE__
+    // 这与 Python 版 page.evaluate() 原理完全一致
+    final result = await _controller.runJavaScriptReturningResult(r'''
+      (function() {
+        try {
+          // ===== Helper: 获取最高画质视频 =====
+          const get_best_video = (stream_obj) => {
+            if (!stream_obj) return null;
+            let candidates = [];
+            const codecs = ['h264', 'h265', 'h266', 'av1'];
+            for (const codec of codecs) {
+              if (stream_obj[codec] && Array.isArray(stream_obj[codec])) {
+                candidates = candidates.concat(stream_obj[codec]);
+              }
+            }
+            if (!candidates.length) return null;
+            candidates.sort((a, b) => (b.size || 0) - (a.size || 0));
+            return candidates[0].masterUrl;
+          };
+
+          // ===== Helper: 清理视频URL =====
+          const cleanVideo = (url) => {
+            if (!url) return null;
+            if (typeof url !== 'string') return null;
+            let newUrl = url.replace(/sns-video-\w+\.xhscdn\.com/, 'sns-video-bd.xhscdn.com');
+            return newUrl.split('?')[0];
+          };
+
+          // ===== 主逻辑: 提取 State =====
+          const state = window.__INITIAL_STATE__;
+          if (!state) return JSON.stringify({error: "No __INITIAL_STATE__ found"});
+          
+          const map = state.note?.noteDetailMap || {};
+          const raw = map._rawValue || map._value || map;
+          
+          const id = Object.keys(raw)[0];
+          if (!id) return JSON.stringify({error: "No noteId found in state"});
+          
+          let info = raw[id];
+          if (info?._rawValue) info = info._rawValue;
+          
+          // 关键: 解包嵌套的 note 对象 (新版 XHS 结构)
+          info = info?.note || info;
+          if (info?._rawValue) info = info._rawValue;
+
+          // ===== 提取图片 =====
+          const imageList = info?.imageList || info?.images_list || [];
+          const images = imageList.map(i => {
+            const item = i._rawValue || i;
+            
+            // Live Photo 视频
+            let liveUrl = null;
+            if (item.livePhoto) {
+              const stream = item.stream?._rawValue || item.stream;
+              liveUrl = get_best_video(stream);
+              if (!liveUrl) {
+                const fid = item.livePhotoFileId || item.live_photo_file_id || item.fileId;
+                if (fid) liveUrl = "http://sns-video-bd.xhscdn.com/stream/" + fid;
+              }
+              liveUrl = cleanVideo(liveUrl);
+            }
+            
+            return { 
+              url: item.urlDefault || item.url_default || item.url || '',
+              traceId: item.traceId || item.fileId || '',
+              liveVideoUrl: liveUrl
+            };
+          });
+
+          // ===== 提取视频 =====
+          let vid = info?.video;
+          if (vid?._rawValue) vid = vid._rawValue;
+          
+          let videoUrl = null;
+          if (vid) {
+            const consumer = vid.consumer?._rawValue || vid.consumer;
+            if (consumer?.originVideoKey) {
+              videoUrl = "https://sns-video-bd.xhscdn.com/" + consumer.originVideoKey;
+            }
+            if (!videoUrl) videoUrl = vid.masterUrl;
+            if (!videoUrl) {
+              const media = vid.media?._rawValue || vid.media;
+              const stream = media?.stream?._rawValue || media?.stream;
+              videoUrl = get_best_video(stream);
+            }
+            videoUrl = cleanVideo(videoUrl);
+          }
+
+          // ===== 提取标签 =====
+          const tags = (info.tagList || []).map(t => t.name).filter(Boolean);
+
+          return JSON.stringify({
+            noteId: id,
+            title: info?.title || info?.displayTitle || 'Untitled',
+            images: images,
+            video: videoUrl,
+            tags: tags
+          });
+          
+        } catch(e) { 
+          return JSON.stringify({error: e.toString()}); 
+        }
+      })();
+    ''');
+    
+    // 解析 JS 返回结果
+    String jsonStr = result.toString();
+    
+    // WebView 返回结果可能带引号包裹
+    if (jsonStr.startsWith('"') && jsonStr.endsWith('"')) {
+      jsonStr = jsonStr.substring(1, jsonStr.length - 1);
+      jsonStr = jsonStr.replaceAll(r'\"', '"').replaceAll(r'\\', r'\');
+    }
+    
     try {
-      _showSnack("正在分析页面...");
-
-      // 1. Get Environment
-      final String? currentUrl = await _controller.currentUrl();
-      debugLog += "URL: $currentUrl\n";
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
       
-      final String cookieStr = await _controller.runJavaScriptReturningResult('document.cookie') as String;
-      // Strip outer quotes if present (standard webview behavior)
-      final cleanCookie = cookieStr.startsWith('"') && cookieStr.endsWith('"') 
-          ? cookieStr.substring(1, cookieStr.length - 1) 
-          : cookieStr;
-          
-      debugLog += "Cookie Len: ${cleanCookie.length}\n";
-      
-      if (cleanCookie.length < 50) {
-         debugLog += "⚠️ Cookie 过短，可能未登录或获取失败\n";
+      if (data.containsKey('error')) {
+        _showErrorDialog("提取失败: ${data['error']}\n\n请确保您已打开一个小红书帖子详情页。");
+        return;
       }
-
-      XHSNote? note;
-      List<String> noteIds = [];
-
-      // Strategy 0: Robust URL Regex Scan
-      // Look for ANY 24-char hex string in the URL (typical XHS Note ID)
-      if (currentUrl != null) {
-          final RegExp noteIdRegex = RegExp(r'[a-f0-9]{24}');
-          final matches = noteIdRegex.allMatches(currentUrl);
-          
-          if (matches.isNotEmpty) {
-             debugLog += "Found ${matches.length} IDs in URL\n";
-             for (final match in matches) {
-                final id = match.group(0)!;
-                debugLog += "Checking ID: $id... ";
-                
-                try {
-                   note = await _fetchNoteDetail(id, cleanCookie);
-                   if (note != null) {
-                      debugLog += "Success!\n";
-                      break; // Found it
-                   } else {
-                      debugLog += "Null Data\n";
-                   }
-                } catch (e) {
-                   debugLog += "Error: $e\n";
-                }
-             }
+      
+      final title = data['title'] as String? ?? 'Untitled';
+      final noteId = data['noteId'] as String? ?? '';
+      final images = (data['images'] as List? ?? []).cast<Map<String, dynamic>>();
+      final video = data['video'] as String?;
+      
+      // 收集所有下载 URL
+      List<String> downloadUrls = [];
+      
+      // 1. 图片
+      for (var img in images) {
+        final url = img['url'] as String?;
+        if (url != null && url.isNotEmpty) {
+          // 转换为 CI 原图链接
+          final traceId = img['traceId'] as String?;
+          if (traceId != null && traceId.isNotEmpty) {
+            downloadUrls.add("https://ci.xiaohongshu.com/$traceId?imageView2/2/w/format/png");
           } else {
-             debugLog += "No IDs found in URL\n";
+            downloadUrls.add(url);
           }
+        }
+        
+        // Live Photo 视频
+        final liveUrl = img['liveVideoUrl'] as String?;
+        if (liveUrl != null && liveUrl.isNotEmpty) {
+          downloadUrls.add(liveUrl);
+        }
       }
-
-      // If Strategy 0 worked, skip JS injection
-      if (note != null && note.resources.isNotEmpty) {
-         _showConfirmDialog(
-           title: "发现 1 篇笔记 (API)",
-           content: "标题: ${note.title}\n包含 ${note.resources.length} 个资源",
-           onConfirm: () => _startDownload(note!),
-         );
-         return;
+      
+      // 2. 纯视频帖
+      if (video != null && video.isNotEmpty) {
+        downloadUrls.add(video);
       }
-
-      // Strategy 1: JS Injection (Fallback)
-      debugLog += "\nTrying JS Injection...\n";
-      final result = await _controller.runJavaScriptReturningResult('''
-        (function() {
-          try {
-             if (window.__INITIAL_STATE__) return JSON.stringify(window.__INITIAL_STATE__);
-             return null;
-          } catch(e) {
-            return "ERR:" + e.toString();
-          }
-        })();
-      ''');
-
-      final resultStr = result.toString();
-      debugLog += "JS Result Len: ${resultStr.length}\n";
-
-      if (resultStr != 'null' && resultStr != '{}' && !resultStr.startsWith('"ERR:')) {
-          String jsonStr = resultStr;
-          if (jsonStr.startsWith('"') && jsonStr.endsWith('"')) {
-            jsonStr = jsonStr.substring(1, jsonStr.length - 1);
-            jsonStr = jsonStr.replaceAll(r'\"', '"').replaceAll(r'\\', r'\');
-          }
-          
-          try {
-             final Map<String, dynamic> state = jsonDecode(jsonStr);
-             
-             // Try parse note directly
-             if (note == null) {
-                note = XHSNote.fromJson(state);
-                if (note != null) debugLog += "JS Note parsed: ${note.title}\n";
-             }
-             
-             // Try parse user profile or feed list
-             if (state['user'] != null && state['user']['notes'] != null) {
-                 final notes = state['user']['notes'];
-                 if (notes is List) {
-                    noteIds.addAll(notes.map((e) => e['noteId'].toString()));
-                 }
-                 debugLog += "Found Profile Notes: ${notes.length}\n";
-             }
-             
-             // Regex Fallback (Scan entire state for IDs)
-             final rawStateStr = jsonEncode(state);
-             final RegExp idRegex = RegExp(r'"noteId":"([a-f0-9]{24})"', caseSensitive: false);
-             final ids = idRegex.allMatches(rawStateStr).map((m) => m.group(1)!).toSet().toList();
-             if (ids.isNotEmpty) {
-               noteIds.addAll(ids);
-               debugLog += "Regex Scan Found: ${ids.length}\n";
-             }
-             
-          } catch(e) {
-             debugLog += "JSON Parse Error: $e\n";
-          }
-      } else {
-          debugLog += "JS State is Null/Empty (SPA Navigation?)\n";
+      
+      if (downloadUrls.isEmpty) {
+        _showErrorDialog("未找到可下载的资源。\n\n请确保您已打开一个包含图片或视频的小红书帖子。");
+        return;
       }
-
-      // Final Decision
-      if (note != null && note!.resources.isNotEmpty) {
-         _showConfirmDialog(
-           title: "发现 1 篇笔记",
-           content: "标题: ${note!.title}\n包含 ${note!.resources.length} 个资源",
-           onConfirm: () => _startDownload(note!),
-         );
-      } else if (noteIds.isNotEmpty) {
-        final uniqueIds = noteIds.toSet().toList();
-        _showConfirmDialog(
-           title: "发现合辑/列表",
-           content: "检测到 ${uniqueIds.length} 篇笔记\n是否批量下载？(将后台解析)",
-           onConfirm: () => _startBatchDownload(uniqueIds),
-        );
-      } else {
-        // Only show debug dialog if absolutely nothing found
-        debugLog += "\n=== Deep Inspection ===\n${StateDebug.lastLog}";
-        _showErrorDialog(debugLog);
-      }
-
+      
+      // 显示确认对话框
+      _showConfirmDialog(
+        title: "发现 1 篇笔记",
+        content: "标题: $title\n包含 ${downloadUrls.length} 个资源\n\n是否开始下载？",
+        onConfirm: () async {
+          _showSnack("开始下载 ${downloadUrls.length} 个文件...");
+          final stats = await DownloadService.downloadAll(downloadUrls);
+          _showSnack("完成! 成功:${stats['success']} 失败:${stats['fail']}");
+        },
+      );
+      
     } catch (e) {
-      debugLog += "\nCRITICAL ERROR: $e\nDeep: ${StateDebug.lastLog}";
-      _showErrorDialog(debugLog);
+      _showErrorDialog("解析失败: $e\n\n原始数据:\n$jsonStr");
     }
   }
 
-  void _showErrorDialog(String log) {
+  void _showErrorDialog(String message) {
     if (!mounted) return;
     showDialog(
       context: context,
@@ -234,13 +267,13 @@ class _BrowserPageState extends State<BrowserPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("如果您已在帖子页面，请尝试刷新后重试。\n\n技术调试信息:", style: TextStyle(fontSize: 13)),
+              const Text("如果您已在帖子页面，请尝试刷新后重试。", style: TextStyle(fontSize: 13)),
               const SizedBox(height: 10),
               Container(
                  width: double.maxFinite,
                  padding: const EdgeInsets.all(8),
                  color: Colors.grey[200],
-                 child: SelectableText(log, style: const TextStyle(fontSize: 10, fontFamily: 'monospace')),
+                 child: SelectableText(message, style: const TextStyle(fontSize: 10, fontFamily: 'monospace')),
               )
             ],
           ),
@@ -277,133 +310,7 @@ class _BrowserPageState extends State<BrowserPage> {
     );
   }
 
-  // Single Download
-  Future<void> _startDownload(XHSNote note) async {
-    _showSnack("开始下载: ${note.title}");
-    final urls = note.resources.map((e) => e.url).toList();
-    final stats = await DownloadService.downloadAll(urls);
-    _showSnack("完成! 成功:${stats['success']} 失败:${stats['fail']}");
-  }
-
-  // Batch Download Logic
-  Future<void> _startBatchDownload(List<String> noteIds) async {
-     _showSnack("正在后台解析 ${noteIds.length} 篇笔记...");
-     
-     // 1. Sync Cookies from WebView (via JS)
-     // WebViewCookieManager does not support getCookies, use JS instead
-     final String cookieStr = await _controller.runJavaScriptReturningResult('document.cookie') as String;
-     // The result might be quoted "key=value...", strip quotes
-     final cleanCookie = cookieStr.startsWith('"') ? cookieStr.substring(1, cookieStr.length-1) : cookieStr;
-     
-     // 2. Background Processing
-     int success = 0;
-     for (var i = 0; i < noteIds.length; i++) {
-        final id = noteIds[i];
-        
-        // Update UI every few items? 
-        // Showing simple snackbar progress for now
-        if (i % 3 == 0) _showSnack("正在处理第 ${i+1}/${noteIds.length} 篇...");
-
-        try {
-           final note = await _fetchNoteDetail(id, cleanCookie);
-           if (note != null) {
-              final urls = note.resources.map((e) => e.url).toList();
-              final stats = await DownloadService.downloadAll(urls);
-              if (stats['success']! > 0) success++;
-           }
-        } catch (e) {
-           print("Batch Error [$id]: $e");
-        }
-        
-        // Anti-ban delay
-        await Future.delayed(const Duration(milliseconds: 1500));
-     }
-     
-     _showSnack("批量任务结束! 成功处理笔记: $success 篇");
-  }
-
-      // Fetch HTML and parse manually
-  Future<XHSNote?> _fetchNoteDetail(String noteId, String cookie) async {
-     try {
-       final dio = import_dio.Dio(); 
-       final uri = "https://www.xiaohongshu.com/explore/$noteId";
-       
-       final response = await dio.get(
-          uri,
-          options: import_dio.Options(
-             headers: {
-                "Cookie": cookie,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.xiaohongshu.com/explore",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                "Sec-Ch-Ua-Mobile": "?0",
-                "Sec-Ch-Ua-Platform": '"Windows"',
-                "Sec-Fetch-Dest": "document",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-Site": "same-origin",
-                "Upgrade-Insecure-Requests": "1",
-             }
-          )
-       );
-       
-       final html = response.data.toString();
-       // Try multiple state variables
-       var jsonStr = "";
-       var match = RegExp(r'window\.__INITIAL_STATE__=(.*?)</script>').firstMatch(html);
-       
-       if (match == null) {
-          // Fallback 1: SSR State
-           match = RegExp(r'window\.__INITIAL_SSR_STATE__=(.*?)</script>').firstMatch(html);
-       }
-       
-       if (match != null) {
-          jsonStr = match.group(1)!;
-          jsonStr = jsonStr.replaceAll("undefined", "null");
-          final state = jsonDecode(jsonStr);
-          
-          // Debugging Structure
-          if (state['note'] != null && state['note']['noteDetailMap'] != null) {
-              final map = state['note']['noteDetailMap'];
-              if (map is Map && map.isNotEmpty) {
-                  final key = map.keys.first;
-                  final detail = map[key];
-                  StateDebug.lastLog = "Detail Keys for $key: ${detail.keys.toList()}";
-                  
-                  // Check 'note' inner wrapper
-                  if (detail['note'] != null && detail['note'] is Map) {
-                       final inner = detail['note'] as Map;
-                       StateDebug.lastLog += "\nInner 'note' Keys: ${inner.keys.toList()}";
-                       
-                       if (inner['imageList'] != null) {
-                          StateDebug.lastLog += "\nInner contains imageList (${(inner['imageList'] as List).length})";
-                       }
-                  } else {
-                       if (detail['imageList'] != null) {
-                           StateDebug.lastLog += "\nOuter contains imageList";
-                       } else {
-                           StateDebug.lastLog += "\n⚠️ No imageList in Outer or Inner!";
-                       }
-                  }
-              }
-          }
-          
-          return XHSNote.fromJson(state);
-       }
-     } catch (e) {
-       print("Fetch Detail Error: $e");
-       StateDebug.lastLog = "Fetch Exception: $e";
-     }
-     return null;
-  }
-
   void _showSnack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
-}
-
-// Global static debug holder
-class StateDebug {
-  static String lastLog = "";
 }
