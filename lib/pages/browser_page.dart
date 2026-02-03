@@ -187,10 +187,11 @@ class _BrowserPageState extends State<BrowserPage> {
   Future<void> _startBatchDownload(List<String> noteIds) async {
      _showSnack("正在后台解析 ${noteIds.length} 篇笔记...");
      
-     // 1. Sync Cookies from WebView to Dio
-     final cookieMgr = WebViewCookieManager();
-     final cookies = await cookieMgr.getCookies(Uri.parse('https://www.xiaohongshu.com'));
-     final cookieStr = cookies.map((c) => "${c.name}=${c.value}").join('; ');
+     // 1. Sync Cookies from WebView (via JS)
+     // WebViewCookieManager does not support getCookies, use JS instead
+     final String cookieStr = await _controller.runJavaScriptReturningResult('document.cookie') as String;
+     // The result might be quoted "key=value...", strip quotes
+     final cleanCookie = cookieStr.replaceAll('"', '');
      
      // 2. Background Processing
      int success = 0;
@@ -202,7 +203,7 @@ class _BrowserPageState extends State<BrowserPage> {
         if (i % 3 == 0) _showSnack("正在处理第 ${i+1}/${noteIds.length} 篇...");
 
         try {
-           final note = await _fetchNoteDetail(id, cookieStr);
+           final note = await _fetchNoteDetail(id, cleanCookie);
            if (note != null) {
               final urls = note.resources.map((e) => e.url).toList();
               final stats = await DownloadService.downloadAll(urls);
