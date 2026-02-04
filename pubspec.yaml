@@ -1,60 +1,46 @@
-name: xhs_downloader_app
-description: A XHS Downloader capable of extracting high-quality media via WebView.
+# ==============================
+# 无损视频切割器 - Flutter 配置文件
+# ==============================
+name: video_cutter
+description: 安卓端无损视频切割与拼接工具
 publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.1.0 <4.0.0'
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
   
-  # UI Icons
-  cupertino_icons: ^1.0.6
+  # 核心功能库
+  ffmpeg_kit_flutter_new: ^6.0.3        # FFmpeg 视频处理
+  file_picker: ^6.0.0                   # 文件选择器
+  video_player: ^2.8.1                  # 视频预览播放
+  path_provider: ^2.1.1                 # 路径获取
+  permission_handler: ^11.1.0           # 权限管理
+  share_plus: ^7.2.1                    # 分享功能
   
-  # Browser Core (Crawling)
-  webview_flutter: ^4.7.0
-  
-  # Network (Downloading)
-  dio: ^5.4.1
-  
-  # System Capability
-  permission_handler: ^11.3.0
-  path_provider: ^2.1.2
-  image_gallery_saver: ^2.0.3 # Replaced gal due to build error
-  
-  # Utils
-  path: ^1.9.0
-  shared_preferences: ^2.2.2
+  # UI 增强库
+  cupertino_icons: ^1.0.2
+  flutter_animate: ^4.3.0               # 动画效果
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
-  
-  # Assets Generator (Disabled until assets are uploaded)
-  # flutter_launcher_icons: ^0.13.1
-  # flutter_native_splash: ^2.3.1
+  flutter_lints: ^2.0.0
+  flutter_launcher_icons: ^0.13.1       # 自定义图标
 
+# --- 图标配置 ---
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: false                            # 只打安卓包
+  image_path: "assets/images/icon.png"
+  min_sdk_android: 21
+
+# --- 资源注册 ---
 flutter:
   uses-material-design: true
   
-  # Assets Registration
-  # assets:
-  #   - assets/images/
-
-# Icon Configuration (Commented out)
-# flutter_launcher_icons:
-#   android: "launcher_icon"
-#   ios: false
-#   image_path: "assets/images/icon.png"
-#   min_sdk_android: 21
-
-# Splash Configuration (Commented out)
-# flutter_native_splash:
-#   color: "#FFFFFF"
-#   image: "assets/images/splash.png"
-#   android_12:
-#     color: "#FFFFFF"
-#     image: "assets/images/splash.png"
+  assets:
+    - assets/images/
