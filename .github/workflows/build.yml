@@ -59,34 +59,88 @@ jobs:
           "
           echo "✅ App label changed to: ${{ env.APP_LABEL }}"
 
-      # 3. 💉 环境自动修复 (Kotlin + SDK 版本)
+      # 3. 💉 环境自动修复 (使用 Python 强制覆写配置文件)
       - name: Fix Android Environment
         run: |
-          echo "🔧 Fixing Kotlin Version to 1.9.0..."
+          echo "🔧 [Step 1] Fixing Kotlin Version in settings.gradle..."
+          python3 << 'EOF'
+          import re
           
           # 修复 settings.gradle 中的 Kotlin 版本
-          sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
+          with open('android/settings.gradle', 'r') as f:
+              content = f.read()
+          content = re.sub(
+              r'id "org\.jetbrains\.kotlin\.android" version "[^"]*"',
+              'id "org.jetbrains.kotlin.android" version "1.9.0"',
+              content
+          )
+          with open('android/settings.gradle', 'w') as f:
+              f.write(content)
+          print("✅ settings.gradle: Kotlin -> 1.9.0")
+          EOF
           
-          # 添加 Kotlin 版本配置到 build.gradle (项目级)
-          if ! grep -q "ext.kotlin_version" android/build.gradle; then
-            sed -i '1i buildscript { ext.kotlin_version = '\''1.9.0'\'' }' android/build.gradle
-          else
-            sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
-          fi
+          echo "🔧 [Step 2] Fixing build.gradle (app level) - Force SDK 34..."
+          python3 << 'EOF'
+          import re
           
-          echo "🔧 Fixing Android SDK to 34 (avoid SDK 35 AAPT2 bug)..."
-          # 强制使用 SDK 34 避免 android-35 的 AAPT2 兼容性问题
-          sed -i 's/compileSdkVersion.*/compileSdkVersion 34/g' android/app/build.gradle
-          sed -i 's/compileSdk.*/compileSdk = 34/g' android/app/build.gradle
-          sed -i 's/targetSdkVersion.*/targetSdkVersion 34/g' android/app/build.gradle
-          sed -i 's/targetSdk.*/targetSdk = 34/g' android/app/build.gradle
+          with open('android/app/build.gradle', 'r') as f:
+              content = f.read()
           
-          echo "🔧 Fixing MinSdkVersion to 24..."
-          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
-          sed -i 's/minSdk.*/minSdk = 24/g' android/app/build.gradle
+          # 替换 flutter.compileSdkVersion 为 34
+          content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 34', content)
+          content = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 34', content)
           
-          echo "🔧 Adding required permissions..."
-          sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\/>\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>\n<uses-permission android:name="android.permission.READ_MEDIA_VIDEO"\/>\n<\/manifest>/g' android/app/src/main/AndroidManifest.xml
+          # 替换 flutter.targetSdkVersion 为 34
+          content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 34', content)
+          content = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 34', content)
+          
+          # 替换 flutter.minSdkVersion 为 24
+          content = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 24', content)
+          content = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 24', content)
+          
+          # 替换任何硬编码的值
+          content = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 24', content)
+          content = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 24', content)
+          
+          with open('android/app/build.gradle', 'w') as f:
+              f.write(content)
+          print("✅ build.gradle: compileSdk=34, targetSdk=34, minSdk=24")
+          EOF
+          
+          echo "🔧 [Step 3] Adding Kotlin version to project build.gradle..."
+          python3 << 'EOF'
+          with open('android/build.gradle', 'r') as f:
+              content = f.read()
+          
+          # 检查是否已有 ext.kotlin_version
+          if 'ext.kotlin_version' not in content:
+              # 在文件开头添加
+              content = "buildscript { ext.kotlin_version = '1.9.0' }\n" + content
+          
+          with open('android/build.gradle', 'w') as f:
+              f.write(content)
+          print("✅ project build.gradle: ext.kotlin_version = 1.9.0")
+          EOF
+          
+          echo "🔧 [Step 4] Adding permissions to AndroidManifest.xml..."
+          python3 << 'EOF'
+          with open('android/app/src/main/AndroidManifest.xml', 'r', encoding='utf-8') as f:
+              content = f.read()
+          
+          permissions = '''
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+              <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+          '''
+          
+          if 'READ_MEDIA_VIDEO' not in content:
+              content = content.replace('</manifest>', permissions + '\n</manifest>')
+              with open('android/app/src/main/AndroidManifest.xml', 'w', encoding='utf-8') as f:
+                  f.write(content)
+          print("✅ AndroidManifest.xml: permissions added")
+          EOF
+          
+          echo "✅ All Android environment fixes applied!"
 
       # 4. 安装依赖
       - name: Install Dependencies
