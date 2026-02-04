@@ -17,7 +17,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     
-    # 强制设置 UTF-8 环境 (解决 sed 写入中文乱码)
     env:
       LANG: "en_US.UTF-8"
 
@@ -30,6 +29,19 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+
+      # 🔥 关键修复：删除有问题的 Android SDK 35，强制使用 SDK 34
+      - name: Fix Android SDK (Remove Broken SDK 35)
+        run: |
+          echo "🔧 Removing broken Android SDK 35..."
+          rm -rf $ANDROID_SDK_ROOT/platforms/android-35 || true
+          rm -rf $ANDROID_HOME/platforms/android-35 || true
+          
+          echo "📦 Installing Android SDK 34..."
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          
+          echo "✅ Android SDK fixed!"
+          ls -la $ANDROID_SDK_ROOT/platforms/
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -59,14 +71,13 @@ jobs:
           "
           echo "✅ App label changed to: ${{ env.APP_LABEL }}"
 
-      # 3. 💉 环境自动修复 (使用 Python 强制覆写配置文件)
+      # 3. 💉 环境自动修复 (Kotlin + SDK 版本)
       - name: Fix Android Environment
         run: |
           echo "🔧 [Step 1] Fixing Kotlin Version in settings.gradle..."
           python3 << 'EOF'
           import re
           
-          # 修复 settings.gradle 中的 Kotlin 版本
           with open('android/settings.gradle', 'r') as f:
               content = f.read()
           content = re.sub(
@@ -86,43 +97,17 @@ jobs:
           with open('android/app/build.gradle', 'r') as f:
               content = f.read()
           
-          # 替换 flutter.compileSdkVersion 为 34
-          content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 34', content)
-          content = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 34', content)
-          
-          # 替换 flutter.targetSdkVersion 为 34
-          content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 34', content)
-          content = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 34', content)
-          
-          # 替换 flutter.minSdkVersion 为 24
-          content = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 24', content)
-          content = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 24', content)
-          
-          # 替换任何硬编码的值
-          content = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 24', content)
-          content = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 24', content)
+          # 替换所有 flutter.xxx 变量为硬编码值
+          content = re.sub(r'flutter\.compileSdkVersion', '34', content)
+          content = re.sub(r'flutter\.targetSdkVersion', '34', content)
+          content = re.sub(r'flutter\.minSdkVersion', '24', content)
           
           with open('android/app/build.gradle', 'w') as f:
               f.write(content)
-          print("✅ build.gradle: compileSdk=34, targetSdk=34, minSdk=24")
+          print("✅ build.gradle: SDK versions fixed")
           EOF
           
-          echo "🔧 [Step 3] Adding Kotlin version to project build.gradle..."
-          python3 << 'EOF'
-          with open('android/build.gradle', 'r') as f:
-              content = f.read()
-          
-          # 检查是否已有 ext.kotlin_version
-          if 'ext.kotlin_version' not in content:
-              # 在文件开头添加
-              content = "buildscript { ext.kotlin_version = '1.9.0' }\n" + content
-          
-          with open('android/build.gradle', 'w') as f:
-              f.write(content)
-          print("✅ project build.gradle: ext.kotlin_version = 1.9.0")
-          EOF
-          
-          echo "🔧 [Step 4] Adding permissions to AndroidManifest.xml..."
+          echo "🔧 [Step 3] Adding permissions to AndroidManifest.xml..."
           python3 << 'EOF'
           with open('android/app/src/main/AndroidManifest.xml', 'r', encoding='utf-8') as f:
               content = f.read()
@@ -140,20 +125,20 @@ jobs:
           print("✅ AndroidManifest.xml: permissions added")
           EOF
           
-          echo "✅ All Android environment fixes applied!"
+          echo "✅ All fixes applied!"
 
       # 4. 安装依赖
       - name: Install Dependencies
         run: flutter pub get
 
-      # 5. 生成图标（如果有的话）
+      # 5. 生成图标
       - name: Generate App Icon
         run: |
           if [ -f "assets/images/icon.png" ]; then
             echo "🎨 Generating App Icon..."
             dart run flutter_launcher_icons
           else
-            echo "⚠️ No icon.png found, skipping icon generation"
+            echo "⚠️ No icon.png found, skipping"
           fi
 
       # 6. 🔑 云端生成签名
@@ -169,11 +154,11 @@ jobs:
           echo "keyAlias=upload" >> android/key.properties
           echo "storeFile=../../upload-keystore.jks" >> android/key.properties
 
-      # 7. ✨ 极致压缩打包
+      # 7. ✨ 构建 APK
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
-      # 8. 重命名为英文文件名
+      # 8. 重命名
       - name: Rename APK
         run: |
           mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${{ env.FILE_NAME }}.apk"
