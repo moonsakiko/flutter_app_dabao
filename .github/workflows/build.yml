@@ -68,8 +68,8 @@ jobs:
       - name: Fix Android Environment
         run: |
           echo "🔧 Fixing Kotlin Version to 1.9.0..."
-          # 强制修改 settings.gradle 插件块 (放宽正则)
-          sed -i 's/id "org.jetbrains.kotlin.android" version .*/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
+          # 强制修改 settings.gradle 插件块 (放宽正则，并确保 apply false)
+          sed -i 's/id "org.jetbrains.kotlin.android" version .*/id "org.jetbrains.kotlin.android" version "1.9.0" apply false/g' android/settings.gradle
           
           # 强制修改根目录 build.gradle (放宽正则)
           sed -i "s/ext.kotlin_version.*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
