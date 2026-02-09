@@ -1,32 +1,37 @@
 import 'package:flutter/material.dart';
 import 'screens/home_page.dart';
-import 'utils/config.dart';
+
+// ==============================
+// 用户自定义配置区 (请在此处修改参数)
+// ==============================
+
+/// APP 中文名称（显示在标题栏和最近任务列表）
+const String appName = '无损剪辑';
+
+/// 主题色
+const Color primaryColor = Color(0xFF6750A4); // Material 3 紫色
+
+// ==============================
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const VideoCutterApp());
+  runApp(const MyApp());
 }
 
-class VideoCutterApp extends StatelessWidget {
-  const VideoCutterApp({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      // 关闭调试角标
       debugShowCheckedModeBanner: false,
-      
-      // APP 标题（显示在任务列表中）
-      title: APP_NAME,
-      
-      // 主题配置 - Material Design 3
+      title: appName, // 最近任务列表显示的名称
       theme: ThemeData(
-        useMaterial3: true,
+        useMaterial3: true, // 开启 Material Design 3
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Color(PRIMARY_COLOR_VALUE),
+          seedColor: primaryColor,
           brightness: Brightness.light,
         ),
-        // 卡片样式
+        // 卡片圆角
         cardTheme: CardTheme(
           elevation: 2,
           shape: RoundedRectangleBorder(
@@ -43,12 +48,11 @@ class VideoCutterApp extends StatelessWidget {
           ),
         ),
       ),
-      
       // 深色主题
       darkTheme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Color(PRIMARY_COLOR_VALUE),
+          seedColor: primaryColor,
           brightness: Brightness.dark,
         ),
         cardTheme: CardTheme(
@@ -66,11 +70,7 @@ class VideoCutterApp extends StatelessWidget {
           ),
         ),
       ),
-      
-      // 跟随系统深色模式
-      themeMode: ThemeMode.system,
-      
-      // 首页
+      themeMode: ThemeMode.system, // 跟随系统主题
       home: const HomePage(),
     );
   }

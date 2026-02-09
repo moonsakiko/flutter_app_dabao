@@ -1,66 +1,58 @@
-name: Flutter Build Signed Release
+# ==============================
+# Flutter 视频无损剪切/合并 云打包脚本
+# ==============================
+name: Flutter Build Release
 on:
-  push:            # 提交代码即自动触发
-  workflow_dispatch: # 也支持手动触发
+  workflow_dispatch: # 手动触发
 
-# ==============================
-# 用户自定义配置区 (请在此处修改参数)
-# ==============================
-# 这是下载文件的名字 (必须英文)
-# 这是安装到手机上显示的中文名
+# 👇 用户自定义配置区 (请在此处修改参数)
 env:
-  FILE_NAME: "VideoCutter"
-  APP_LABEL: "无损视频切割器"
-# ==============================
+  # APP 中文名（安装后显示的名称）
+  APP_LABEL: "无损剪辑"
+  # 下载包名（英文，避免乱码）
+  FILE_NAME: "video_lossless_cutter"
+  # 内部项目名（必须英文+下划线）
+  PROJECT_NAME: "video_lossless_cutter"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     
+    # 设置 UTF-8 环境（避免中文乱码）
     env:
       LANG: "en_US.UTF-8"
 
     steps:
+      # 1. 检出代码
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      # 2. 配置 Java 17
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # 🔥 关键修复：删除有问题的 Android SDK 35，强制使用 SDK 34
-      - name: Fix Android SDK (Remove Broken SDK 35)
-        run: |
-          echo "🔧 Removing broken Android SDK 35..."
-          rm -rf $ANDROID_SDK_ROOT/platforms/android-35 || true
-          rm -rf $ANDROID_HOME/platforms/android-35 || true
-          
-          echo "📦 Installing Android SDK 34..."
-          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0"
-          
-          echo "✅ Android SDK fixed!"
-          ls -la $ANDROID_SDK_ROOT/platforms/
-
+      # 3. 配置 Flutter 3.19
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.0'
           channel: 'stable'
 
-      # 1. 生成安卓工程骨架
+      # 4. 生成 Android 工程骨架
       - name: Create Android Project
         run: |
           if [ ! -d "android" ]; then
-            flutter create . --platforms android --project-name video_cutter
+            echo "⚙️ Generating Android project scaffold..."
+            flutter create . --platforms android --project-name ${{ env.PROJECT_NAME }}
           fi
 
-      # 2. 🏷️ 强制修改中文名
+      # 5. 修改 APP 中文名
       - name: Change App Name (UTF-8 Safe)
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          
           python3 -c "
           import re
           with open('$MANIFEST', 'r', encoding='utf-8') as f:
@@ -71,82 +63,34 @@ jobs:
           "
           echo "✅ App label changed to: ${{ env.APP_LABEL }}"
 
-      # 3. 💉 环境自动修复 (Kotlin + SDK 版本)
+      # 6. 修复 Android 环境（Kotlin 1.9.0 + MinSDK 21）
       - name: Fix Android Environment
         run: |
-          echo "🔧 [Step 1] Fixing Kotlin Version in settings.gradle..."
-          python3 << 'EOF'
-          import re
+          echo "🔧 Fixing Kotlin Version to 1.9.0..."
+          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
+          sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
           
-          with open('android/settings.gradle', 'r') as f:
-              content = f.read()
-          content = re.sub(
-              r'id "org\.jetbrains\.kotlin\.android" version "[^"]*"',
-              'id "org.jetbrains.kotlin.android" version "1.9.0"',
-              content
-          )
-          with open('android/settings.gradle', 'w') as f:
-              f.write(content)
-          print("✅ settings.gradle: Kotlin -> 1.9.0")
-          EOF
-          
-          echo "🔧 [Step 2] Fixing build.gradle (app level) - Force SDK 34..."
-          python3 << 'EOF'
-          import re
-          
-          with open('android/app/build.gradle', 'r') as f:
-              content = f.read()
-          
-          # 替换所有 flutter.xxx 变量为硬编码值
-          content = re.sub(r'flutter\.compileSdkVersion', '34', content)
-          content = re.sub(r'flutter\.targetSdkVersion', '34', content)
-          content = re.sub(r'flutter\.minSdkVersion', '24', content)
-          
-          with open('android/app/build.gradle', 'w') as f:
-              f.write(content)
-          print("✅ build.gradle: SDK versions fixed")
-          EOF
-          
-          echo "🔧 [Step 3] Adding permissions to AndroidManifest.xml..."
-          python3 << 'EOF'
-          with open('android/app/src/main/AndroidManifest.xml', 'r', encoding='utf-8') as f:
-              content = f.read()
-          
-          permissions = '''
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-              <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
-          '''
-          
-          if 'READ_MEDIA_VIDEO' not in content:
-              content = content.replace('</manifest>', permissions + '\n</manifest>')
-              with open('android/app/src/main/AndroidManifest.xml', 'w', encoding='utf-8') as f:
-                  f.write(content)
-          print("✅ AndroidManifest.xml: permissions added")
-          EOF
-          
-          echo "✅ All fixes applied!"
+          echo "🔧 Fixing MinSdkVersion to 21..."
+          sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
 
-      # 4. 安装依赖
+      # 7. 安装依赖
       - name: Install Dependencies
         run: flutter pub get
 
-      # 5. 生成图标
+      # 8. 生成图标（如果有配置）
       - name: Generate App Icon
         run: |
           if [ -f "assets/images/icon.png" ]; then
             echo "🎨 Generating App Icon..."
-            dart run flutter_launcher_icons
-          else
-            echo "⚠️ No icon.png found, skipping"
+            dart run flutter_launcher_icons || echo "⚠️ Icon generation skipped"
           fi
 
-      # 6. 🔑 云端生成签名
+      # 9. 云端生成签名（临时密钥）
       - name: Generate Keystore
         run: |
           keytool -genkey -v -keystore upload-keystore.jks \
             -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias upload -dname "CN=Android, OU=Android, O=Android, L=Android, S=Android, C=US" \
+            -alias upload -dname "CN=VideoLosslessCutter, OU=Android, O=Android, L=Android, S=Android, C=US" \
             -storepass android -keypass android
           
           echo "storePassword=android" > android/key.properties
@@ -154,18 +98,18 @@ jobs:
           echo "keyAlias=upload" >> android/key.properties
           echo "storeFile=../../upload-keystore.jks" >> android/key.properties
 
-      # 7. ✨ 构建 APK
+      # 10. 打包 APK（Release + ARM64 极限瘦身）
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
-      # 8. 重命名
-      - name: Rename APK
+      # 11. 重命名输出文件
+      - name: Rename Output
         run: |
           mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${{ env.FILE_NAME }}.apk"
 
-      # 9. 上传产物
-      - name: Upload Artifact
+      # 12. 上传 APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.FILE_NAME }}_Install_Package
+          name: ${{ env.FILE_NAME }}_Release
           path: "build/app/outputs/flutter-apk/${{ env.FILE_NAME }}.apk"

@@ -1,336 +1,184 @@
 import 'dart:io';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit_config.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:ffmpeg_kit_flutter_new/statistics.dart';
-import 'config.dart';
-import 'file_helper.dart';
+import 'package:path_provider/path_provider.dart';
 
-/// 视频信息数据类
-class VideoInfo {
-  final String path;           // 文件路径
-  final int durationMs;        // 时长（毫秒）
-  final int width;             // 宽度
-  final int height;            // 高度
-  final String codec;          // 编码格式
-  final int bitrate;           // 比特率
-  final int fileSize;          // 文件大小（字节）
-
-  VideoInfo({
-    required this.path,
-    required this.durationMs,
-    required this.width,
-    required this.height,
-    required this.codec,
-    required this.bitrate,
-    required this.fileSize,
-  });
-
-  /// 格式化时长显示
-  String get formattedDuration {
-    final int totalSeconds = durationMs ~/ 1000;
-    final int hours = totalSeconds ~/ 3600;
-    final int minutes = (totalSeconds % 3600) ~/ 60;
-    final int seconds = totalSeconds % 60;
-    
-    if (hours > 0) {
-      return "$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
-    }
-    return "${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
-  }
-
-  /// 格式化分辨率显示
-  String get resolution => "${width}x$height";
-}
-
-/// FFmpeg 处理结果
-class FFmpegResult {
-  final bool success;
-  final String? outputPath;
-  final String? errorMessage;
-
-  FFmpegResult({
-    required this.success,
-    this.outputPath,
-    this.errorMessage,
-  });
-}
-
-/// FFmpeg 服务类
-/// 封装视频切割、拼接等核心功能
+/// FFmpeg 服务封装类
+/// 提供无损视频剪切和合并功能
 class FFmpegService {
-  
-  /// 获取视频信息
-  static Future<VideoInfo?> getVideoInfo(String inputPath) async {
-    try {
-      final session = await FFprobeKit.getMediaInformation(inputPath);
-      final info = session.getMediaInformation();
-      
-      if (info == null) {
-        if (ENABLE_DEBUG_LOG) print('无法获取视频信息');
-        return null;
-      }
-      
-      // 获取时长（毫秒）
-      final durationStr = info.getDuration();
-      final durationMs = durationStr != null 
-          ? (double.parse(durationStr) * 1000).toInt() 
-          : 0;
-      
-      // 获取比特率
-      final bitrateStr = info.getBitrate();
-      final bitrate = bitrateStr != null ? int.tryParse(bitrateStr) ?? 0 : 0;
-      
-      // 获取视频流信息
-      int width = 0;
-      int height = 0;
-      String codec = "unknown";
-      
-      final streams = info.getStreams();
-      if (streams != null) {
-        for (final stream in streams) {
-          final type = stream.getType();
-          if (type == "video") {
-            width = stream.getWidth() ?? 0;
-            height = stream.getHeight() ?? 0;
-            codec = stream.getCodec() ?? "unknown";
-            break;
-          }
-        }
-      }
-      
-      // 获取文件大小
-      final file = File(inputPath);
-      final fileSize = await file.length();
-      
-      return VideoInfo(
-        path: inputPath,
-        durationMs: durationMs,
-        width: width,
-        height: height,
-        codec: codec,
-        bitrate: bitrate,
-        fileSize: fileSize,
-      );
-    } catch (e) {
-      if (ENABLE_DEBUG_LOG) print('获取视频信息失败: $e');
+  /// 进度回调类型
+  /// [progress] 0.0 ~ 1.0 表示进度百分比
+  typedef ProgressCallback = void Function(double progress);
+
+  /// 无损剪切视频
+  /// 
+  /// [inputPath] 输入视频路径
+  /// [outputPath] 输出视频路径
+  /// [startTime] 起始时间（格式：HH:MM:SS 或秒数）
+  /// [endTime] 结束时间（格式：HH:MM:SS 或秒数）
+  /// [onProgress] 进度回调
+  /// 
+  /// 返回：成功返回输出文件路径，失败返回 null
+  static Future<String?> cutVideo({
+    required String inputPath,
+    required String outputPath,
+    required String startTime,
+    required String endTime,
+    ProgressCallback? onProgress,
+  }) async {
+    // 构造 FFmpeg 命令
+    // -ss: 起始时间（放在 -i 前面可实现更快的 seek）
+    // -to: 结束时间
+    // -c copy: 不重新编码，直接拷贝码流（无损）
+    // -map 0: 保留所有轨道（视频+音频+字幕）
+    // -avoid_negative_ts make_zero: 修复时间戳问题
+    final command = '-ss $startTime -to $endTime -i "$inputPath" '
+        '-c copy -map 0 -avoid_negative_ts make_zero -y "$outputPath"';
+
+    print('🔧 执行剪切命令: $command');
+
+    // 执行命令
+    final session = await FFmpegKit.execute(command);
+    final returnCode = await session.getReturnCode();
+
+    if (ReturnCode.isSuccess(returnCode)) {
+      print('✅ 剪切成功: $outputPath');
+      return outputPath;
+    } else {
+      final logs = await session.getAllLogsAsString();
+      print('❌ 剪切失败: $logs');
       return null;
     }
   }
-  
-  /// 无损切割视频
-  /// [inputPath] 输入视频路径
-  /// [startMs] 开始时间（毫秒）
-  /// [endMs] 结束时间（毫秒）
-  /// [onProgress] 进度回调（0.0 - 1.0）
-  static Future<FFmpegResult> trimVideo({
-    required String inputPath,
-    required int startMs,
-    required int endMs,
-    Function(double progress)? onProgress,
-  }) async {
-    try {
-      // 生成输出路径
-      final extension = FileHelper.getFileExtension(inputPath);
-      final outputPath = await FileHelper.getOutputPath(
-        prefix: TRIM_FILE_PREFIX,
-        extension: extension.isNotEmpty ? extension : 'mp4',
-      );
-      
-      // 转换时间为 FFmpeg 格式（HH:MM:SS.mmm）
-      final startTime = _formatTime(startMs);
-      final duration = _formatTime(endMs - startMs);
-      
-      // 构建 FFmpeg 命令
-      // -ss 放在 -i 前面可以更快地定位（输入级别 seek）
-      // -c copy 表示无损复制（不重新编码）
-      // -avoid_negative_ts make_zero 避免时间戳问题
-      final command = '-ss $startTime -i "$inputPath" -t $duration -c copy -avoid_negative_ts make_zero "$outputPath"';
-      
-      if (ENABLE_DEBUG_LOG) print('执行命令: ffmpeg $command');
-      
-      // 计算总时长用于进度计算
-      final totalDurationMs = endMs - startMs;
-      
-      // 执行命令
-      final session = await FFmpegKit.executeAsync(
-        command,
-        (session) async {
-          // 命令完成回调
-          final returnCode = await session.getReturnCode();
-          if (ENABLE_DEBUG_LOG) {
-            print('FFmpeg 完成，返回码: $returnCode');
-          }
-        },
-        (log) {
-          // 日志回调
-          if (ENABLE_DEBUG_LOG) print('FFmpeg: ${log.getMessage()}');
-        },
-        (Statistics statistics) {
-          // 进度回调
-          if (onProgress != null && totalDurationMs > 0) {
-            final time = statistics.getTime();
-            final progress = (time / totalDurationMs).clamp(0.0, 1.0);
-            onProgress(progress);
-          }
-        },
-      );
-      
-      // 等待完成
-      final returnCode = await session.getReturnCode();
-      
-      if (ReturnCode.isSuccess(returnCode)) {
-        return FFmpegResult(success: true, outputPath: outputPath);
-      } else {
-        final logs = await session.getAllLogs();
-        final errorMsg = logs.isNotEmpty ? logs.last.getMessage() : '未知错误';
-        return FFmpegResult(success: false, errorMessage: errorMsg);
-      }
-    } catch (e) {
-      return FFmpegResult(success: false, errorMessage: e.toString());
-    }
-  }
-  
-  /// 无损拼接视频
-  /// [inputPaths] 输入视频路径列表（按顺序拼接）
-  /// [onProgress] 进度回调（0.0 - 1.0）
-  static Future<FFmpegResult> mergeVideos({
+
+  /// 无损合并多个视频
+  /// 
+  /// [inputPaths] 输入视频路径列表（按顺序合并）
+  /// [outputPath] 输出视频路径
+  /// [onProgress] 进度回调
+  /// 
+  /// 注意：所有视频必须具有相同的编码参数（分辨率、编码器、音频采样率等）
+  /// 
+  /// 返回：成功返回输出文件路径，失败返回 null
+  static Future<String?> mergeVideos({
     required List<String> inputPaths,
-    Function(double progress)? onProgress,
+    required String outputPath,
+    ProgressCallback? onProgress,
   }) async {
-    if (inputPaths.length < 2) {
-      return FFmpegResult(success: false, errorMessage: '至少需要2个视频文件');
+    if (inputPaths.isEmpty) {
+      print('❌ 输入文件列表为空');
+      return null;
     }
+
+    if (inputPaths.length == 1) {
+      // 只有一个文件时，直接复制
+      await File(inputPaths.first).copy(outputPath);
+      return outputPath;
+    }
+
+    // 创建临时的 list.txt 文件（FFmpeg concat demuxer 需要）
+    final tempDir = await getTemporaryDirectory();
+    final listFile = File('${tempDir.path}/concat_list.txt');
     
-    try {
-      // 生成 concat 文件（FFmpeg 拼接需要的列表文件）
-      final tempDir = await FileHelper.getOutputPath(prefix: 'concat_list_');
-      final concatFilePath = tempDir.replaceAll('.mp4', '.txt');
-      
-      // 写入文件列表
-      final StringBuffer fileListContent = StringBuffer();
-      for (final path in inputPaths) {
-        // 使用单引号包裹路径，并转义单引号
-        final escapedPath = path.replaceAll("'", "'\\''");
-        fileListContent.writeln("file '$escapedPath'");
-      }
-      
-      await File(concatFilePath).writeAsString(fileListContent.toString());
-      
-      if (ENABLE_DEBUG_LOG) {
-        print('拼接文件列表:\n$fileListContent');
-      }
-      
-      // 生成输出路径
-      final extension = FileHelper.getFileExtension(inputPaths.first);
-      final outputPath = await FileHelper.getOutputPath(
-        prefix: MERGE_FILE_PREFIX,
-        extension: extension.isNotEmpty ? extension : 'mp4',
-      );
-      
-      // 构建 FFmpeg 命令
-      // -f concat 使用拼接模式
-      // -safe 0 允许使用绝对路径
-      // -c copy 无损复制
-      final command = '-f concat -safe 0 -i "$concatFilePath" -c copy "$outputPath"';
-      
-      if (ENABLE_DEBUG_LOG) print('执行命令: ffmpeg $command');
-      
-      // 计算总时长（用于进度估算）
-      int totalDurationMs = 0;
-      for (final path in inputPaths) {
-        final info = await getVideoInfo(path);
-        if (info != null) {
-          totalDurationMs += info.durationMs;
-        }
-      }
-      
-      // 执行命令
-      final session = await FFmpegKit.executeAsync(
-        command,
-        (session) async {
-          // 清理临时文件
-          await FileHelper.deleteFile(concatFilePath);
-        },
-        (log) {
-          if (ENABLE_DEBUG_LOG) print('FFmpeg: ${log.getMessage()}');
-        },
-        (Statistics statistics) {
-          if (onProgress != null && totalDurationMs > 0) {
-            final time = statistics.getTime();
-            final progress = (time / totalDurationMs).clamp(0.0, 1.0);
-            onProgress(progress);
-          }
-        },
-      );
-      
-      // 等待完成
-      final returnCode = await session.getReturnCode();
-      
-      // 清理临时文件
-      await FileHelper.deleteFile(concatFilePath);
-      
-      if (ReturnCode.isSuccess(returnCode)) {
-        return FFmpegResult(success: true, outputPath: outputPath);
-      } else {
-        final logs = await session.getAllLogs();
-        final errorMsg = logs.isNotEmpty ? logs.last.getMessage() : '未知错误';
-        return FFmpegResult(success: false, errorMessage: errorMsg);
-      }
-    } catch (e) {
-      return FFmpegResult(success: false, errorMessage: e.toString());
+    // 写入文件列表
+    // 格式：每行 file '/path/to/video.mp4'
+    final listContent = inputPaths.map((path) => "file '$path'").join('\n');
+    await listFile.writeAsString(listContent);
+    
+    print('📝 合并列表文件: ${listFile.path}');
+    print('📋 内容:\n$listContent');
+
+    // 构造 FFmpeg 命令
+    // -f concat: 使用 concat demuxer
+    // -safe 0: 允许绝对路径
+    // -c copy: 不重新编码（无损）
+    final command = '-f concat -safe 0 -i "${listFile.path}" '
+        '-c copy -y "$outputPath"';
+
+    print('🔧 执行合并命令: $command');
+
+    // 执行命令
+    final session = await FFmpegKit.execute(command);
+    final returnCode = await session.getReturnCode();
+
+    // 清理临时文件
+    if (await listFile.exists()) {
+      await listFile.delete();
+    }
+
+    if (ReturnCode.isSuccess(returnCode)) {
+      print('✅ 合并成功: $outputPath');
+      return outputPath;
+    } else {
+      final logs = await session.getAllLogsAsString();
+      print('❌ 合并失败: $logs');
+      return null;
     }
   }
-  
-  /// 检查多个视频是否兼容拼接
-  /// 返回 null 表示兼容，否则返回不兼容的原因
-  static Future<String?> checkMergeCompatibility(List<String> inputPaths) async {
-    if (inputPaths.length < 2) {
-      return '至少需要2个视频文件';
+
+  /// 获取视频时长（秒）
+  /// 
+  /// [videoPath] 视频文件路径
+  /// 返回：视频时长（秒），失败返回 0
+  static Future<double> getVideoDuration(String videoPath) async {
+    // 使用 ffprobe 获取视频信息
+    final command = '-v error -show_entries format=duration '
+        '-of default=noprint_wrappers=1:nokey=1 "$videoPath"';
+    
+    final session = await FFmpegKit.execute('-i "$videoPath" 2>&1');
+    final output = await session.getOutput();
+    
+    // 解析时长信息
+    // 格式通常是: Duration: 00:01:30.50, ...
+    final durationRegex = RegExp(r'Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)');
+    final match = durationRegex.firstMatch(output ?? '');
+    
+    if (match != null) {
+      final hours = int.parse(match.group(1)!);
+      final minutes = int.parse(match.group(2)!);
+      final seconds = double.parse(match.group(3)!);
+      return hours * 3600 + minutes * 60 + seconds;
     }
     
-    // 获取第一个视频的信息作为基准
-    final firstInfo = await getVideoInfo(inputPaths.first);
-    if (firstInfo == null) {
-      return '无法读取第一个视频的信息';
-    }
-    
-    // 检查其他视频是否兼容
-    for (int i = 1; i < inputPaths.length; i++) {
-      final info = await getVideoInfo(inputPaths[i]);
-      if (info == null) {
-        return '无法读取第${i + 1}个视频的信息';
-      }
-      
-      // 检查分辨率
-      if (info.width != firstInfo.width || info.height != firstInfo.height) {
-        return '视频分辨率不一致\n'
-            '视频1: ${firstInfo.resolution}\n'
-            '视频${i + 1}: ${info.resolution}';
-      }
-      
-      // 检查编码格式
-      if (info.codec != firstInfo.codec) {
-        return '视频编码格式不一致\n'
-            '视频1: ${firstInfo.codec}\n'
-            '视频${i + 1}: ${info.codec}';
-      }
-    }
-    
-    return null; // 兼容
+    return 0;
   }
-  
-  /// 格式化时间（毫秒 -> HH:MM:SS.mmm）
-  static String _formatTime(int ms) {
-    final int totalSeconds = ms ~/ 1000;
-    final int hours = totalSeconds ~/ 3600;
-    final int minutes = (totalSeconds % 3600) ~/ 60;
-    final int seconds = totalSeconds % 60;
-    final int millis = ms % 1000;
+
+  /// 格式化时间（秒 -> HH:MM:SS）
+  static String formatTime(double seconds) {
+    final duration = Duration(milliseconds: (seconds * 1000).round());
+    final hours = duration.inHours.toString().padLeft(2, '0');
+    final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
+    final secs = (duration.inSeconds % 60).toString().padLeft(2, '0');
+    return '$hours:$minutes:$secs';
+  }
+
+  /// 解析时间字符串（HH:MM:SS -> 秒）
+  static double parseTime(String timeStr) {
+    final parts = timeStr.split(':');
+    if (parts.length == 3) {
+      final hours = int.tryParse(parts[0]) ?? 0;
+      final minutes = int.tryParse(parts[1]) ?? 0;
+      final seconds = double.tryParse(parts[2]) ?? 0;
+      return hours * 3600 + minutes * 60 + seconds;
+    }
+    return 0;
+  }
+
+  /// 生成输出文件名
+  /// 在原文件名后添加后缀
+  static String generateOutputPath(String inputPath, String suffix) {
+    final file = File(inputPath);
+    final dir = file.parent.path;
+    final name = file.uri.pathSegments.last;
+    final dotIndex = name.lastIndexOf('.');
     
-    return "${hours.toString().padLeft(2, '0')}:"
-        "${minutes.toString().padLeft(2, '0')}:"
-        "${seconds.toString().padLeft(2, '0')}."
-        "${millis.toString().padLeft(3, '0')}";
+    if (dotIndex > 0) {
+      final baseName = name.substring(0, dotIndex);
+      final ext = name.substring(dotIndex);
+      return '$dir/${baseName}_$suffix$ext';
+    }
+    return '$dir/${name}_$suffix';
   }
 }

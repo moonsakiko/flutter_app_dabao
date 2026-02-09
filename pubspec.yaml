@@ -1,46 +1,62 @@
 # ==============================
-# 无损视频切割器 - Flutter 配置文件
+# 项目配置文件 (用户可修改区域在下方标注)
 # ==============================
-name: video_cutter
-description: 安卓端无损视频切割与拼接工具
+name: video_lossless_cutter
+description: 视频无损剪切与合并工具
 publish_to: 'none'
 version: 1.0.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
 
+# ==============================
+# 依赖库
+# ==============================
 dependencies:
   flutter:
     sdk: flutter
-  
-  # 核心功能库
-  ffmpeg_kit_flutter_new: ^4.1.0        # FFmpeg 视频处理（已验证可用版本）
-  file_picker: ^6.0.0                   # 文件选择器
-  video_player: ^2.8.1                  # 视频预览播放
-  path_provider: ^2.1.1                 # 路径获取
-  permission_handler: ^11.1.0           # 权限管理
-  share_plus: ^7.2.1                    # 分享功能
-  
-  # UI 增强库
   cupertino_icons: ^1.0.2
-  flutter_animate: ^4.3.0               # 动画效果
+  
+  # FFmpeg 核心（社区维护版，替代已退役的 FFmpegKit）
+  ffmpeg_kit_flutter_new: ^6.0.3
+  
+  # 文件选择
+  file_picker: ^6.1.1
+  
+  # 视频播放预览
+  video_player: ^2.8.2
+  
+  # 应用目录（存放临时文件）
+  path_provider: ^2.1.2
+  
+  # 权限管理
+  permission_handler: ^11.3.0
+  
+  # 分享功能
+  share_plus: ^7.2.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
-  flutter_launcher_icons: ^0.13.1       # 自定义图标
+  
+  # 图标生成（云端使用）
+  flutter_launcher_icons: ^0.13.1
 
-# --- 图标配置 ---
-flutter_launcher_icons:
-  android: "launcher_icon"
-  ios: false                            # 只打安卓包
-  image_path: "assets/images/icon.png"
-  min_sdk_android: 21
-
-# --- 资源注册 ---
+# ==============================
+# 资源注册区
+# ==============================
 flutter:
   uses-material-design: true
   
   assets:
     - assets/images/
+
+# ==============================
+# 图标配置（云端自动生成）
+# ==============================
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: false  # 只打安卓包，关闭 iOS 避免报错
+  image_path: "assets/images/icon.png"
+  min_sdk_android: 21
