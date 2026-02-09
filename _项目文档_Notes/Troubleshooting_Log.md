@@ -23,7 +23,21 @@
 
 ---
 
-## [2026-02-09] FFmpeg 插件版本不存在
+## [2026-02-09] AAPT2 与 Android SDK 35 不兼容
+
+### 现象描述
+构建报错 `ERROR:AAPT: aapt2 E ... Failed to load resources table in APK .../android-35/android.jar`
+
+### 根本原因
+GitHub Actions 升级了最新的 Android SDK 35，但旧版 AGP (Android Gradle Plugin) 无法正确解析 SDK 35 的资源表，导致资源合并失败。
+
+### 解决方案
+强制指定 `compileSdkVersion` 为 **34**（Android 14），避开 SDK 35。
+在构建脚本中使用 `sed` 将默认的 `flutter.compileSdkVersion` 替换为 `34`。
+
+---
+
+## [2026-02-09] Kotlin 版本严重滞后 (1.6.0 vs 1.9.0)
 
 ### 现象描述
 云端构建报错：`ffmpeg_kit_flutter_new ^6.0.3 which doesn't match any versions`

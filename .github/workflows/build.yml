@@ -65,15 +65,28 @@ jobs:
           "
           echo "✅ App label changed to: ${{ env.APP_LABEL }}"
 
-      # 6. 修复 Android 环境（Kotlin 1.9.0 + MinSDK 21）
+      # 6. 修复 Android 环境（Kotlin 1.9.0 + MinSDK 24 + CompileSDK 34）
       - name: Fix Android Environment
         run: |
           echo "🔧 Fixing Kotlin Version to 1.9.0..."
+          # 强制修改 settings.gradle 插件块
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.0"/g' android/settings.gradle
+          
+          # 强制修改根目录 build.gradle (防止旧模板残留)
           sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.0'/g" android/build.gradle
           
-          echo "🔧 Fixing MinSdkVersion to 24..."
+          echo "🔧 Fixing MinSdkVersion to 24 and CompileSdkVersion to 34..."
+          # 修改 app/build.gradle
+          # 1. 提升 minSdkVersion 到 24
           sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
+          # 2. 强制指定 compileSdkVersion 为 34 (解决 AGP 与 Android 35 不兼容问题)
+          sed -i 's/compileSdkVersion.*/compileSdkVersion 34/g' android/app/build.gradle
+          # 3. 如果没有 compileSdkVersion，尝试替换 flutter.compileSdkVersion
+          sed -i 's/flutter.compileSdkVersion/34/g' android/app/build.gradle
+
+          echo "🔧 Injecting R8/Proguard rules..."
+          # 解决 build 过程中的其他潜在资源缩减问题
+          echo "android.enableR8=true" >> android/gradle.properties
 
       # 7. 安装依赖
       - name: Install Dependencies
