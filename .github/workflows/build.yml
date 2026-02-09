@@ -78,11 +78,14 @@ jobs:
           echo "🔧 Fixing MinSdkVersion to 24 and CompileSdkVersion to 34..."
           # 修改 app/build.gradle
           # 1. 提升 minSdkVersion 到 24
-          sed -i 's/minSdkVersion.*/minSdkVersion 24/g' android/app/build.gradle
-          # 2. 强制指定 compileSdkVersion 为 34 (解决 AGP 与 Android 35 不兼容问题)
-          sed -i 's/compileSdkVersion.*/compileSdkVersion 34/g' android/app/build.gradle
-          # 3. 如果没有 compileSdkVersion，尝试替换 flutter.compileSdkVersion
-          sed -i 's/flutter.compileSdkVersion/34/g' android/app/build.gradle
+          sed -i 's/minSdkVersion .*/minSdkVersion 24/g' android/app/build.gradle
+          # 2. 强制指定 compileSdkVersion 为 34
+          sed -i 's/compileSdkVersion .*/compileSdkVersion 34/g' android/app/build.gradle
+          # 3. 强制指定 targetSdkVersion 为 34 (移除对 flutter.targetSdkVersion 的依赖，避免 null 报错)
+          sed -i 's/targetSdkVersion .*/targetSdkVersion 34/g' android/app/build.gradle
+          
+          # 4. 移除ndkVersion (如果存在)，让 AGP 自动选择
+          sed -i '/ndkVersion/d' android/app/build.gradle
 
           echo "🔧 Injecting R8/Proguard rules..."
           # 解决 build 过程中的其他潜在资源缩减问题

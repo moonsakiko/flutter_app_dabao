@@ -37,6 +37,24 @@ GitHub Actions 升级了最新的 Android SDK 35，但旧版 AGP (Android Gradle
 
 ---
 
+## [2026-02-09] Gradle 脚本语法损坏 (Null Object 报错)
+
+### 现象描述
+构建报错 `Cannot get property '34' on null object`.
+
+### 根本原因
+使用 `sed` 替换 `flutter.compileSdkVersion` 时破坏了 Gradle 文件结构，或者导致了对 `flutter` 对象的错误引用。
+例如：将 `targetSdkVersion flutter.targetSdkVersion` 错误地修改为了依赖空对象的表达式。
+
+### 解决方案
+不要尝试部分替换变量名，而是使用 `sed` **整行替换**：
+```bash
+sed -i 's/targetSdkVersion .*/targetSdkVersion 34/g' android/app/build.gradle
+```
+彻底移除对 `flutter` 动态变量的依赖，全部使用硬编码的数字，既稳定又安全。
+
+---
+
 ## [2026-02-09] Kotlin 版本严重滞后 (1.6.0 vs 1.9.0)
 
 ### 现象描述
