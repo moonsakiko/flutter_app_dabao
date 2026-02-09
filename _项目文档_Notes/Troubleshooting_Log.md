@@ -39,12 +39,16 @@ GitHub Actions 升级了最新的 Android SDK 35，但旧版 AGP (Android Gradle
 强制指定 `compileSdkVersion` 为 **34**（Android 14）。
 **最佳实践**：在 `settings.gradle` 中配置全局生命周期监听器。这比修改 `build.gradle` 更安全，因为它能在任何项目配置开始前就注册钩子，彻底避免 "already evaluated" 或 "too late" 错误。
 
+### 解决方案
+强制指定 `compileSdkVersion` 为 **34**（Android 14）。
+**最佳实践**：不要使用 `afterEvaluate`（太晚）或 `beforeProject`（太早），而是使用 `plugins.withId`。这是 Gradle 官方推荐的配置插件的方式，它会在插件被应用的瞬间执行闭包，时机完美。
+
 ```groovy
-// settings.gradle 末尾追加
-gradle.lifecycle.beforeProject { project ->
-    project.afterEvaluate {
-        if (project.extensions.findByName("android") != null) {
-            project.android.compileSdkVersion 34
+// android/build.gradle 的 subprojects 块中
+subprojects {
+    plugins.withId("com.android.library") {
+        android {
+            compileSdkVersion 34
         }
     }
 }
