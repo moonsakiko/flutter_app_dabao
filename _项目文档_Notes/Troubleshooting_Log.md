@@ -4,6 +4,23 @@
 
 ---
 
+## [2026-02-09] FFmpeg 插件版本不存在
+
+### 现象描述
+云端构建报错：`ffmpeg_kit_flutter_new ^6.0.3 which doesn't match any versions`
+
+### 根本原因
+pub.dev 上 `ffmpeg_kit_flutter_new` 最新版本是 `4.1.0`，`6.0.3` 版本根本不存在。
+
+### 解决方案
+将 `pubspec.yaml` 中的版本从 `^6.0.3` 改为 `^4.1.0`。
+
+### 避坑建议
+- 添加依赖前先去 [pub.dev](https://pub.dev) 确认实际可用版本
+- 不要凭记忆或猜测写版本号
+
+---
+
 ## [2026-02-09] 技术选型：FFmpegKit 已退役
 
 ### 现象描述
